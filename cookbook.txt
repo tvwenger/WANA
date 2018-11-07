@@ -1,0 +1,143 @@
+# cookbook.txt - WISP/WANA recipe for imaging and HII region analysis
+#
+# Some variables herein are designed for the Southern HII Region
+# Discovery Survey. These commands are meant to be run within CASA.
+# You can paste commands in CASA using the command "%paste"
+#
+# Trey V. Wenger - September 2018
+
+# Link WISP imaging pipeline
+!imaging
+sys.path = ['.']+sys.path
+# Set field name to be current directory
+field = os.getcwd().split('/')[-1]
+
+# Identify channels to un-flag
+plotms(vis='{0}_concat.ms'.format(field),xaxis='channel',yaxis='amp',iteraxis='spw',coloraxis='baseline',avgtime='1e7',correlation='RR,LL')
+
+# Unflag channels if necessary
+import unflag
+unflag.main(field,vis='{0}_concat.ms'.format(field),config_file='shrds.ini')
+
+# Image un-tapered and tapered
+import imaging
+imaging.main(field,vis='{0}_concat.ms'.format(field),config_file='shrds.ini',regrid=True,uvtaper=False,auto='0,1,2,3,6,7,8,9,10')
+imaging.main(field,vis='{0}_concat.ms'.format(field),config_file='shrds.ini',regrid=True,uvtaper=True,auto='0,1,2,3,6,7,8,9,10')
+
+# inspect diagnostic plots and identify good line spws for stacking, spw 17 is often bad
+goodspws = '1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,18,19,20,21'
+with open('goodspws.txt','w') as f: f.write(goodspws)
+
+# Smooth tapered data to common beam size
+import smooth
+smooth.main(field,config_file='shrds.ini',imagetype='clean.uvtaper',overwrite=True)
+
+# plot WISE Catalog on MFS images
+import plot_regions
+with open('goodspws.txt','r') as f: goodspws = f.readline().rstrip()
+spws = 'cont,'+goodspws
+wisefile = '../wise_V1.5_positions.csv'
+plot_regions.main(field,spws,wisefile=wisefile,taper=False,imsmooth=False)
+plot_regions.main(field,spws,wisefile=wisefile,taper=True,imsmooth=False)
+plot_regions.main(field,spws,wisefile=wisefile,taper=True,imsmooth=True)
+
+# identify continuum components, save regions with names like:
+# GNAME.notaper.rgn; GNAME.uvtaper.rgn; GNAME.uvtaper.imsmooth.rgn
+viewer('{0}.cont.mfs.clean.pbcor.image.fits'.format(field))
+viewer('{0}.cont.mfs.clean.uvtaper.pbcor.image.fits'.format(field))
+viewer('{0}.cont.mfs.clean.uvtaper.pbcor.imsmooth.image.fits'.format(field))
+
+# Expand peaks to include full emission, clipped at 5 sigma
+import gen_regions
+import glob
+with open('goodspws.txt','r') as f: goodspws = f.readline().rstrip()
+spws = 'cont,'+goodspws
+gen_regions.main(field,spws,sigmaclip=5.,taper=False,imsmooth=False)
+gen_regions.main(field,spws,sigmaclip=5.,taper=True,imsmooth=False)
+gen_regions.main(field,spws,sigmaclip=5.,taper=True,imsmooth=True)
+
+# plot WISE Catalog on MFS images with regions
+import plot_regions
+with open('goodspws.txt','r') as f: goodspws = f.readline().rstrip()
+spws = 'cont,'+goodspws
+wisefile = '../wise_V1.5_positions.csv'
+plot_regions.main(field,spws,wisefile=wisefile,taper=False,imsmooth=False)
+plot_regions.main(field,spws,wisefile=wisefile,taper=True,imsmooth=False)
+plot_regions.main(field,spws,wisefile=wisefile,taper=True,imsmooth=True)
+
+# Analyze data
+import cont_analysis
+import line_analysis
+import plot_cont
+import plot_line
+import glob
+with open('goodspws.txt','r') as f: goodspws = f.readline().rstrip()
+spws = np.array([int(spw) for spw in goodspws.split(',')])
+g1 = ','.join([str(s) for s in spws[(spws > 0)*(spws < 8)]])
+g2 = ','.join([str(s) for s in spws[(spws > 7)*(spws < 14)]])
+IF1 = ','.join([str(s) for s in spws[(spws > 0)*(spws < 14)]])
+IF2 = ','.join([str(s) for s in spws[(spws > 14)*(spws < 22)]])
+stackedspws = [stack for stack in [g1,g2,IF1,IF2,goodspws] if stack != '']
+stackedlabels = [label for stack,label in zip([g1,g2,IF1,IF2,goodspws],['g1','g2','IF1','IF2','all']) if stack != '']
+spws = 'cont,'+goodspws
+auto = True
+# un-tapered
+regs = glob.glob('*.notaper.rgn')
+for reg in regs:
+    # peak
+    cont_analysis.main(field,[reg],spws,fluxtype='peak',taper=False,imsmooth=False,outfile='{0}.clean.peak.continfo.txt'.format(reg))
+    plot_cont.main('{0}.clean.peak.continfo.txt'.format(reg),'{0}.peak'.format(reg),title='{0} (peak)'.format(reg),fluxtype='peak',freqmin=4000,freqmax=10000)
+    line_analysis.main(field,[reg],goodspws,'{0}.peak'.format(reg),stackedspws=stackedspws,stackedlabels=stackedlabels,fluxtype='peak',taper=False,imsmooth=False,outfile='{0}.clean.peak.wt.specinfo.txt'.format(reg),weight=True,auto=auto,config_file='shrds.ini')
+    plot_line.main('{0}.clean.peak.wt.specinfo.txt'.format(reg),'{0}.peak.wt'.format(reg),title='{0} (peak; wt)'.format(reg),fluxtype='peak',freqmin=4000,freqmax=10000)
+    # total
+    full_regs = [reg.replace('.rgn','.spw{0}.fullrgn.fits'.format(spw))
+    	         if spw != 'cont' else reg.replace('.rgn','.cont.fullrgn.fits')
+		 for spw in spws.split(',')]
+    cont_analysis.main(field,full_regs,spws,fluxtype='total',taper=False,imsmooth=False,outfile='{0}.clean.total.continfo.txt'.format(reg))
+    plot_cont.main('{0}.clean.total.continfo.txt'.format(reg),'{0}.total'.format(reg),title='{0} (total)'.format(reg),fluxtype='total',freqmin=4000,freqmax=10000)
+    full_regs = [reg.replace('.rgn','.spw{0}.fullrgn.fits'.format(spw))
+    	         for spw in goodspws.split(',')]
+    line_analysis.main(field,full_regs,goodspws,'{0}.total'.format(reg),stackedspws=stackedspws,stackedlabels=stackedlabels,fluxtype='total',taper=False,imsmooth=False,outfile='{0}.clean.total.wt.specinfo.txt'.format(reg),weight=True,auto=auto,config_file='shrds.ini')
+    plot_line.main('{0}.clean.total.wt.specinfo.txt'.format(reg),'{0}.total.wt'.format(reg),title='{0} (total; wt)'.format(reg),fluxtype='total',freqmin=4000,freqmax=10000)
+# uv-tapered
+regs = glob.glob('*.uvtaper.rgn')
+for reg in regs:
+    # peak
+    cont_analysis.main(field,[reg],spws,fluxtype='peak',taper=True,imsmooth=False,outfile='{0}.clean.peak.continfo.txt'.format(reg))
+    plot_cont.main('{0}.clean.peak.continfo.txt'.format(reg),'{0}.peak'.format(reg),title='{0} (peak)'.format(reg),fluxtype='peak',freqmin=4000,freqmax=10000)
+    line_analysis.main(field,[reg],goodspws,'{0}.peak'.format(reg),stackedspws=stackedspws,stackedlabels=stackedlabels,fluxtype='peak',taper=True,imsmooth=False,outfile='{0}.clean.peak.wt.specinfo.txt'.format(reg),weight=True,auto=auto,config_file='shrds.ini')
+    plot_line.main('{0}.clean.peak.wt.specinfo.txt'.format(reg),'{0}.peak.wt'.format(reg),title='{0} (peak; wt)'.format(reg),fluxtype='peak',freqmin=4000,freqmax=10000)
+    # total
+    full_regs = [reg.replace('.rgn','.spw{0}.fullrgn.fits'.format(spw))
+    	         if spw != 'cont' else reg.replace('.rgn','.cont.fullrgn.fits')
+		 for spw in spws.split(',')]
+    cont_analysis.main(field,full_regs,spws,fluxtype='total',taper=True,imsmooth=False,outfile='{0}.clean.total.continfo.txt'.format(reg))
+    plot_cont.main('{0}.clean.total.continfo.txt'.format(reg),'{0}.total'.format(reg),title='{0} (total)'.format(reg),fluxtype='total',freqmin=4000,freqmax=10000)
+    full_regs = [reg.replace('.rgn','.spw{0}.fullrgn.fits'.format(spw))
+    	         for spw in goodspws.split(',')]
+    line_analysis.main(field,full_regs,goodspws,'{0}.total'.format(reg),stackedspws=stackedspws,stackedlabels=stackedlabels,fluxtype='total',taper=True,imsmooth=False,outfile='{0}.clean.total.wt.specinfo.txt'.format(reg),weight=True,auto=auto,config_file='shrds.ini')
+    plot_line.main('{0}.clean.total.wt.specinfo.txt'.format(reg),'{0}.total.wt'.format(reg),title='{0} (total; wt)'.format(reg),fluxtype='total',freqmin=4000,freqmax=10000)
+# uv-tapered + imsmooth
+regs = glob.glob('*.uvtaper.rgn')
+for reg in regs:
+    # peak
+    cont_analysis.main(field,[reg],spws,fluxtype='peak',taper=True,imsmooth=True,outfile='{0}.clean.imsmooth.peak.continfo.txt'.format(reg))
+    plot_cont.main('{0}.clean.imsmooth.peak.continfo.txt'.format(reg),'{0}.imsmooth.peak'.format(reg),title='{0}.imsmooth (peak)'.format(reg),fluxtype='peak',freqmin=4000,freqmax=10000)
+    line_analysis.main(field,[reg],goodspws,'{0}.imsmooth.peak'.format(reg),stackedspws=stackedspws,stackedlabels=stackedlabels,fluxtype='peak',taper=True,imsmooth=True,outfile='{0}.clean.imsmooth.peak.wt.specinfo.txt'.format(reg),weight=True,auto=auto,config_file='shrds.ini')
+    plot_line.main('{0}.clean.imsmooth.peak.wt.specinfo.txt'.format(reg),'{0}.imsmooth.peak.wt'.format(reg),title='{0}.imsmooth (peak; wt)'.format(reg),fluxtype='peak',freqmin=4000,freqmax=10000)
+    # total
+    full_regs = [reg.replace('.rgn','.imsmooth.spw{0}.fullrgn.fits'.format(spw))
+    	         if spw != 'cont' else reg.replace('.rgn','.imsmooth.cont.fullrgn.fits')
+		 for spw in spws.split(',')]
+    cont_analysis.main(field,full_regs,spws,fluxtype='total',taper=True,imsmooth=True,outfile='{0}.clean.imsmooth.total.continfo.txt'.format(reg))
+    plot_cont.main('{0}.clean.imsmooth.total.continfo.txt'.format(reg),'{0}.imsmooth.total'.format(reg),title='{0}.imsmooth (total)'.format(reg),fluxtype='total',freqmin=4000,freqmax=10000)
+    full_regs = [reg.replace('.rgn','.imsmooth.spw{0}.fullrgn.fits'.format(spw))
+    	         for spw in goodspws.split(',')]
+    line_analysis.main(field,full_regs,goodspws,'{0}.imsmooth.total'.format(reg),stackedspws=stackedspws,stackedlabels=stackedlabels,fluxtype='total',taper=True,imsmooth=True,outfile='{0}.clean.imsmooth.total.wt.specinfo.txt'.format(reg),weight=True,auto=auto,config_file='shrds.ini')
+    plot_line.main('{0}.clean.imsmooth.total.wt.specinfo.txt'.format(reg),'{0}.imsmooth.total.wt'.format(reg),title='{0}.imsmooth (total; wt)'.format(reg),fluxtype='total',freqmin=4000,freqmax=10000)
+
+# generate electron temperature images
+import te_image
+te_image.main(field,spws=goodspws,uvtaper=False,imsmooth=False,stack=False)
+te_image.main(field,spws=goodspws,uvtaper=True,imsmooth=False,stack=False)
+te_image.main(field,spws=goodspws,uvtaper=True,imsmooth=True,stack=True)
