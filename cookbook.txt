@@ -4,7 +4,7 @@
 # Discovery Survey. These commands are meant to be run within CASA.
 # You can paste commands in CASA using the command "%paste"
 #
-# Trey V. Wenger - September 2018
+# Trey V. Wenger - November 2018
 
 # Link WISP imaging pipeline
 !imaging
