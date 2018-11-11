@@ -13,7 +13,7 @@ sys.path = ['.']+sys.path
 field = os.getcwd().split('/')[-1]
 
 # Identify channels to un-flag
-plotms(vis='{0}_concat.ms'.format(field),xaxis='channel',yaxis='amp',iteraxis='spw',coloraxis='baseline',avgtime='1e7',correlation='XX,YY')
+plotms(vis='{0}_concat.ms'.format(field),xaxis='channel',yaxis='amp',iteraxis='spw',coloraxis='baseline',avgtime='1e7',correlation='RR,LL')
 
 # Unflag channels if necessary
 import unflag
