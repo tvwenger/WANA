@@ -817,7 +817,7 @@ def fit_line(title,region,fluxtype,specdata,outfile,auto=False):
     #
     # Re-plot spectrum, get Gaussian fit estimates, fit Gaussian
     #
-    if not auto):
+    if not auto:
         line_start,center_guesses,sigma_guesses,line_end = \
             myplot.get_gauss(specdata_velocity,flux_contsub,
                              xlabel='Velocity (km/s)',ylabel=ylabel,
@@ -1128,7 +1128,7 @@ def main(field,regions,spws,pdflabel,stackedspws=[],stackedlabels=[],
             #
             # Compute line SNR
             #
-            channel_width = config.getfloat("Clean","chanwidth")
+            channel_width = config.getfloat("Clean","width")
             linesnr = 0.7*line_brightness/rms * (line_fwhm/channel_width)**0.5
             #
             # calc Te
@@ -1224,7 +1224,7 @@ def main(field,regions,spws,pdflabel,stackedspws=[],stackedlabels=[],
             #
             # Compute line SNR
             #
-            channel_width = config.getfloat("Clean","chanwidth")
+            channel_width = config.getfloat("Clean","width")
             linesnr = 0.7*line_brightness/rms * (line_fwhm/channel_width)**0.5
             #
             # calc Te
