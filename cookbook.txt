@@ -35,7 +35,7 @@ smooth.main(field,config_file='shrds.ini',imagetype='clean.uvtaper',overwrite=Tr
 # plot WISE Catalog on MFS images
 import plot_regions
 with open('goodspws.txt','r') as f: goodspws = f.readline().rstrip()
-spws = 'cont,'+goodspws
+spws = 'cont,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21'
 wisefile = '../wise_V1.5_positions.csv'
 plot_regions.main(field,spws,wisefile=wisefile,taper=False,imsmooth=False)
 plot_regions.main(field,spws,wisefile=wisefile,taper=True,imsmooth=False)
@@ -51,7 +51,7 @@ viewer('{0}.cont.mfs.clean.uvtaper.pbcor.imsmooth.image.fits'.format(field))
 import gen_regions
 import glob
 with open('goodspws.txt','r') as f: goodspws = f.readline().rstrip()
-spws = 'cont,'+goodspws
+spws = 'cont,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21'
 gen_regions.main(field,spws,sigmaclip=5.,taper=False,imsmooth=False)
 gen_regions.main(field,spws,sigmaclip=5.,taper=True,imsmooth=False)
 gen_regions.main(field,spws,sigmaclip=5.,taper=True,imsmooth=True)
@@ -59,7 +59,7 @@ gen_regions.main(field,spws,sigmaclip=5.,taper=True,imsmooth=True)
 # plot WISE Catalog on MFS images with regions
 import plot_regions
 with open('goodspws.txt','r') as f: goodspws = f.readline().rstrip()
-spws = 'cont,'+goodspws
+spws = 'cont,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21'
 wisefile = '../wise_V1.5_positions.csv'
 plot_regions.main(field,spws,wisefile=wisefile,taper=False,imsmooth=False)
 plot_regions.main(field,spws,wisefile=wisefile,taper=True,imsmooth=False)
@@ -79,7 +79,7 @@ IF1 = ','.join([str(s) for s in spws[(spws > 0)*(spws < 14)]])
 IF2 = ','.join([str(s) for s in spws[(spws > 14)*(spws < 22)]])
 stackedspws = [stack for stack in [g1,g2,IF1,IF2,goodspws] if stack != '']
 stackedlabels = [label for stack,label in zip([g1,g2,IF1,IF2,goodspws],['g1','g2','IF1','IF2','all']) if stack != '']
-spws = 'cont,'+goodspws
+spws = 'cont,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21'
 auto = True
 # un-tapered
 regs = glob.glob('*.notaper.rgn')
