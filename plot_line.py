@@ -71,6 +71,8 @@ def main(specfile,label,title=None,fluxtype='peak',
     # Read data
     #
     data = np.genfromtxt(specfile,dtype=None,names=True)
+    if len(data) == 0:
+        continue
     #
     # curve fit range
     #
@@ -81,6 +83,8 @@ def main(specfile,label,title=None,fluxtype='peak',
     multcomps = ['(b)','(c)','(d)','(e)']
     is_multcomp = np.array([lineid[-3:] in multcomps for lineid in data['lineid']])
     data = data[~is_multcomp]
+    if len(data) == 0:
+        continue
     #
     # Determine which are Hnalpha lines and which are stacked
     #
