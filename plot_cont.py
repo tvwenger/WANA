@@ -89,13 +89,17 @@ def main(contfile,label,title=None,fluxtype='peak',
     # Fit curves if we have enough data
     #
     if len(ydata) > 4:
-        # fit power law
-        fit,cov = np.polyfit(np.log10(xdata),np.log10(ydata),1,
-                             w=np.log(10.)*ydata/e_ydata,cov=True)
-        yfit = lambda x: 10.**np.poly1d(fit)(np.log10(x))
-        ax.plot(xfit,yfit(xfit),'k--',zorder=10,
-                label=r'$F_{{\nu,\rm C}} \propto \nu^{{({0:.2f}\pm{1:.2f})}}$'.format(fit[0],np.sqrt(cov[0,0])))
-        ax.legend(loc='upper right',fontsize=10)
+        try:
+            # fit power law
+            fit,cov = np.polyfit(np.log10(xdata),np.log10(ydata),1,
+                                 w=np.log(10.)*ydata/e_ydata,cov=True)
+            yfit = lambda x: 10.**np.poly1d(fit)(np.log10(x))
+            ax.plot(xfit,yfit(xfit),'k--',zorder=10,
+                    label=r'$F_{{\nu,\rm C}} \propto \nu^{{({0:.2f}\pm{1:.2f})}}$'.format(fit[0],np.sqrt(cov[0,0])))
+            ax.legend(loc='upper right',fontsize=10)
+        except:
+            # fit failed
+            pass
     # plot total continuum
     ax.plot([freqmin,freqmax],[total['cont'],total['cont']],'k-')
     ax.fill_between([freqmin,freqmax],

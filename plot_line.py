@@ -112,11 +112,15 @@ def main(specfile,label,title=None,fluxtype='peak',
     # Fit curves if we have enough data
     #
     if len(ydata) > 4:
-        # fit line 
-        fit,cov = np.polyfit(xdata,ydata,1,w=1./e_ydata,cov=True)
-        ax.plot(xfit,np.poly1d(fit)(xfit),'k-',zorder=10,
-                label=r'$F_{{\nu,\rm L}} = ({0:.3f}\pm{1:.3f})\times10^{{-3}}\nu + ({2:.3f}\pm{3:.3f})$'.format(fit[0]*1.e3,np.sqrt(cov[0,0])*1.e3,fit[1],np.sqrt(cov[1,1])))
-        ax.legend(loc='upper left',fontsize=10)
+        try:
+            # fit line 
+            fit,cov = np.polyfit(xdata,ydata,1,w=1./e_ydata,cov=True)
+            ax.plot(xfit,np.poly1d(fit)(xfit),'k-',zorder=10,
+                    label=r'$F_{{\nu,\rm L}} = ({0:.3f}\pm{1:.3f})\times10^{{-3}}\nu + ({2:.3f}\pm{3:.3f})$'.format(fit[0]*1.e3,np.sqrt(cov[0,0])*1.e3,fit[1],np.sqrt(cov[1,1])))
+            ax.legend(loc='upper left',fontsize=10)
+        except:
+            # fit failed
+            pass
     # plot stacked line
     ax.plot([freqmin,freqmax],[stacked['line'],stacked['line']],'k-')
     ax.fill_between([freqmin,freqmax],
@@ -150,11 +154,15 @@ def main(specfile,label,title=None,fluxtype='peak',
     # Fit curves if we have enough data
     #
     if len(ydata) > 4:
-        # fit line 
-        fit,cov = np.polyfit(xdata,ydata,1,w=1./e_ydata,cov=True)
-        ax.plot(xfit,np.poly1d(fit)(xfit),'k-',zorder=10,
-                label=r'$\Delta V = ({0:.3f}\pm{1:.3f})\times10^{{-3}}\nu + ({2:.3f}\pm{3:.3f})$'.format(fit[0]*1.e3,np.sqrt(cov[0,0])*1.e3,fit[1],np.sqrt(cov[1,1])))
-        ax.legend(loc='upper left',fontsize=10)
+        try:
+            # fit line 
+            fit,cov = np.polyfit(xdata,ydata,1,w=1./e_ydata,cov=True)
+            ax.plot(xfit,np.poly1d(fit)(xfit),'k-',zorder=10,
+                    label=r'$\Delta V = ({0:.3f}\pm{1:.3f})\times10^{{-3}}\nu + ({2:.3f}\pm{3:.3f})$'.format(fit[0]*1.e3,np.sqrt(cov[0,0])*1.e3,fit[1],np.sqrt(cov[1,1])))
+            ax.legend(loc='upper left',fontsize=10)
+        except:
+            # fit failed
+            pass
     # plot stacked line
     ax.plot([freqmin,freqmax],[stacked['fwhm'],stacked['fwhm']],'k-')
     ax.fill_between([freqmin,freqmax],
@@ -190,11 +198,15 @@ def main(specfile,label,title=None,fluxtype='peak',
     # Fit curves if we have enough data
     #
     if len(ydata) > 4:
-        # fit line 
-        fit,cov = np.polyfit(xdata,ydata,1,w=1./e_ydata,cov=True)
-        ax.plot(xfit,np.poly1d(fit)(xfit),'k-',zorder=10,
-                label=r'$F_{{\nu,\rm L}}/F_{{\nu,\rm C}} = ({0:.3f}\pm{1:.3f})\times10^{{-3}}\nu + ({2:.3f}\pm{3:.3f})$'.format(fit[0]*1.e3,np.sqrt(cov[0,0])*1.e3,fit[1],np.sqrt(cov[1,1])))
-        ax.legend(loc='upper left',fontsize=10)
+        try:
+            # fit line 
+            fit,cov = np.polyfit(xdata,ydata,1,w=1./e_ydata,cov=True)
+            ax.plot(xfit,np.poly1d(fit)(xfit),'k-',zorder=10,
+                    label=r'$F_{{\nu,\rm L}}/F_{{\nu,\rm C}} = ({0:.3f}\pm{1:.3f})\times10^{{-3}}\nu + ({2:.3f}\pm{3:.3f})$'.format(fit[0]*1.e3,np.sqrt(cov[0,0])*1.e3,fit[1],np.sqrt(cov[1,1])))
+            ax.legend(loc='upper left',fontsize=10)
+        except:
+            # fit failed
+            pass
     # plot stacked line
     ax.plot([freqmin,freqmax],[stacked['line2cont'],stacked['line2cont']],'k-')
     ax.fill_between([freqmin,freqmax],
@@ -225,11 +237,15 @@ def main(specfile,label,title=None,fluxtype='peak',
     # Fit curves if we have enough data
     #
     if len(ydata) > 4:
-        # fit line 
-        fit,cov = np.polyfit(xdata,ydata,1,w=1./e_ydata,cov=True)
-        ax.plot(xfit,np.poly1d(fit)(xfit),'k-',zorder=10,
-                label=r'$T_e = ({0:.3f}\pm{1:.3f})\times10^{{-3}}\nu + ({2:.3f}\pm{3:.3f})$'.format(fit[0]*1.e3,np.sqrt(cov[0,0])*1.e3,fit[1],np.sqrt(cov[1,1])))
-        ax.legend(loc='upper left',fontsize=10)
+        try:
+            # fit line 
+            fit,cov = np.polyfit(xdata,ydata,1,w=1./e_ydata,cov=True)
+            ax.plot(xfit,np.poly1d(fit)(xfit),'k-',zorder=10,
+                    label=r'$T_e = ({0:.3f}\pm{1:.3f})\times10^{{-3}}\nu + ({2:.3f}\pm{3:.3f})$'.format(fit[0]*1.e3,np.sqrt(cov[0,0])*1.e3,fit[1],np.sqrt(cov[1,1])))
+            ax.legend(loc='upper left',fontsize=10)
+        except:
+            # fit failed
+            pass
     # plot stacked line
     ax.plot([freqmin,freqmax],[stacked['elec_temp'],stacked['elec_temp']],'k-')
     ax.fill_between([freqmin,freqmax],
