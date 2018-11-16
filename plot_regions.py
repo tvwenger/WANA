@@ -192,8 +192,10 @@ def main(field,spws,
         peak_regions = glob.glob('*{0}'.format(rgnend))
         full_regions = [reg.replace('.rgn','.{0}.fullrgn.fits'.format(spw)) for reg in peak_regions]
         labels = [reg.replace(rgnend,'') for reg in peak_regions]
-        colors = ['b','r','g','y','m','c']
-        for peak_reg,full_reg,col,lab in zip(peak_regions,full_regions,colors,labels):
+        cmap_jet = plt.get_cmap('jet')
+        colors = iter(jet(np.linspace(0,1,len(peak_regions))))
+        for peak_reg,full_reg,lab in zip(peak_regions,full_regions,labels):
+            col = next(colors)
             if os.path.exists(peak_reg):
                 # plot peak region as "+"
                 with open(peak_reg,'r') as f:
