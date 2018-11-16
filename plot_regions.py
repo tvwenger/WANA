@@ -215,7 +215,7 @@ def main(field,spws,
             if os.path.exists(full_reg):
                 # plot full region(s) as contour
                 full_hdu = fits.open(full_reg)[0]
-                ax.contour(full_hdu.data[0,0],colors=col,
+                ax.contour(full_hdu.data[0,0],colors=[col],
                            zorder=110,linewidths=0.5)
         #
         # Add regions legend
