@@ -545,7 +545,7 @@ class ClickPlot:
         #
         args = []
         cmap_jet = plt.get_cmap('jet')
-        colors = iter(jet(np.linspace(0,1,len(amp))))
+        colors = iter(cmap_jet(np.linspace(0,1,len(amp))))
         for a,c,s in zip(amp,center,sigma):
             color = next(colors)
             if len(amp) == 1:
