@@ -891,6 +891,20 @@ def fit_line(title,region,fluxtype,specdata,outfile,auto=False):
             e_line_fwhm = np.array([np.nan])
         logger.info("Done.")
     #
+    # Check that line centers are not within 2*FWHM of edge
+    #
+    for ngauss in range(len(line_brightness)):
+        if ((line_center[ngauss] - 2.*line_fwhm[ngauss] < np.min(specdata_velocity)) or
+            (line_center[ngauss] + 2.*line_fwhm[ngauss] > np.max(specdata_velocity))):
+            line_brightness[ngauss] = np.nan
+            e_line_brightness[ngauss] = np.nan
+            line_center[ngauss] = np.nan
+            e_line_center[ngauss] = np.nan
+            line_sigma[ngauss] = np.nan
+            e_line_sigma[ngauss] = np.nan
+            line_fwhm[ngauss] = np.nan
+            e_line_fwhm[ngauss] = np.nan
+    #
     # Plot fit
     #
     myplot.plot_fit(specdata_velocity,flux_contsub,
