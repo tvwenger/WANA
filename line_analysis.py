@@ -891,11 +891,18 @@ def fit_line(title,region,fluxtype,specdata,outfile,auto=False):
             e_line_fwhm = np.array([np.nan])
         logger.info("Done.")
     #
-    # Check that line centers are not within 2*FWHM of edge
+    # Check that line parameters are sane:
+    # - centers are not within 2*FWHM of edge
+    # - FWHM are not < 5 km/s
+    # - FWHM are not > 150 km/s
+    # - intensity and FWHM errors are not > 50%
     #
     for ngauss in range(len(line_brightness)):
         if ((line_center[ngauss] - 2.*line_fwhm[ngauss] < np.min(specdata_velocity)) or
-            (line_center[ngauss] + 2.*line_fwhm[ngauss] > np.max(specdata_velocity))):
+            (line_center[ngauss] + 2.*line_fwhm[ngauss] > np.max(specdata_velocity)) or
+            (line_fwhm[ngauss] < 5.) or (line_fwhm[ngauss] > 150.) or
+            (e_line_brightness[ngauss]/line_brightness[ngauss] > 0.5) or
+            (e_line_fwhm[ngauss]/line_fwhm[ngauss] > 0.5)):
             line_brightness[ngauss] = np.nan
             e_line_brightness[ngauss] = np.nan
             line_center[ngauss] = np.nan
