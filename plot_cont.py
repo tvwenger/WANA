@@ -35,24 +35,24 @@ import matplotlib.pyplot as plt
 
 __version__ = "1.0"
 
-def power_law(x,a,b):
+def line(x,m,b):
     """
-    Equation for a 1-D power law
-    y = a*x**b
+    Equation for a 1-D line
+    y = m*x + b
 
     Inputs:
       x : scalar or 1-D array of scalars
           The x-positions at which to compute y
-      a : scalar
-          The power-law coefficient
+      m : scalar
+          The slope
       b : scalar
-          The power-law index
+          The offset
 
     Returns: y
       y : scalar or 1-D array of scalars
-          Power-law evaluated at each x position
+          Line evaluated at each x position
     """
-    return a*x**b
+    return m*x + b
 
 def main(contfile,label,title=None,fluxtype='peak',
          freqmin=4000,freqmax=10000):
@@ -118,18 +118,20 @@ def main(contfile,label,title=None,fluxtype='peak',
             #yfit = lambda x: 10.**np.poly1d(fit)(np.log10(x))
             #ax.plot(xfit,yfit(xfit),'k--',zorder=10,
             #        label=r'$F_{{\nu,\rm C}} \propto \nu^{{({0:.2f}\pm{1:.2f})}}$'.format(fit[0],np.sqrt(cov[0,0])))
-            fit,cov = curve_fit(power_law, xdata, ydata, method='trf', loss='soft_l1')
-            yfit = power_law(xfit,fit[0],fit[1])
-            ax.plot(xfit,yfit,'k--',zorder=10,
-                    label=r'$F_{{\nu,\rm C}} \propto \nu^{{({0:.2f}\pm{1:.2f})}}$'.format(fit[1],np.sqrt(cov[1,1])))
+            fit,cov = curve_fit(line, np.log10(xdata), np.log10(ydata),
+                                sigma = np.log(10.)*ydata/e_ydata, absolute_sigma=True,
+                                method='trf', loss='soft_l1')
+            yfit = lambda x: 10.**line(np.log10(x),fit[0],fit[1])
+            ax.plot(xfit,yfit(xfit),'k--',zorder=10,
+                    label=r'$F_{{\nu,\rm C}} \propto \nu^{{({0:.2f}\pm{1:.2f})}}$'.format(fit[0],np.sqrt(cov[0,0])))
             ax.legend(loc='upper right',fontsize=10)
             #
             # plot residuals
             #
-            residuals = ydata - power_law(xdata,fit[0],fit[1])
+            residuals = ydata - yfit(xdata)
             r2 = 1. - np.sum(residuals**2.)/np.sum((ydata-np.mean(ydata))**2.)
             res_ax.errorbar(xdata,residuals,yerr=e_ydata,fmt='o',color='k')
-            res_ax.annotate(r"R^2 = {0:.1f}".format(r2),xy=(0.1,0.8),xycoords='axes fraction')
+            res_ax.annotate(r"$R^2$ = {0:.1f}".format(r2),xy=(0.1,0.8),xycoords='axes fraction')
         except:
             # fit failed
             pass
