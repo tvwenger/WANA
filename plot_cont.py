@@ -30,9 +30,29 @@ Trey V. Wenger November 2018 - V1.0
 import os
 import sys
 import numpy as np
+from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 
 __version__ = "1.0"
+
+def power_law(x,a,b):
+    """
+    Equation for a 1-D power law
+    y = a*x**b
+
+    Inputs:
+      x : scalar or 1-D array of scalars
+          The x-positions at which to compute y
+      a : scalar
+          The power-law coefficient
+      b : scalar
+          The power-law index
+
+    Returns: y
+      y : scalar or 1-D array of scalars
+          Power-law evaluated at each x position
+    """
+    return a*x**b
 
 def main(contfile,label,title=None,fluxtype='peak',
          freqmin=4000,freqmax=10000):
@@ -73,11 +93,11 @@ def main(contfile,label,title=None,fluxtype='peak',
     #
     xfit = np.linspace(freqmin,freqmax,100)
     #
-    # Plot continuum SED
+    # Plot continuum SED and fit residuals
     #
     print("Plotting continuum SED...")
     plt.ioff()
-    fig, ax = plt.subplots()
+    fig, (ax, res_ax) = plt.subplots(2,1, sharex=True, gridspec_kw = {'height_ratios':[3, 1]})
     # catch bad data
     isnan = ((np.isnan(data['cont'])) | (data['cont'] <= 0.))
     xdata = data['frequency'][~is_total*~isnan]
@@ -90,13 +110,26 @@ def main(contfile,label,title=None,fluxtype='peak',
     #
     if len(ydata) > 4:
         try:
+            #
             # fit power law
-            fit,cov = np.polyfit(np.log10(xdata),np.log10(ydata),1,
-                                 w=np.log(10.)*ydata/e_ydata,cov=True)
-            yfit = lambda x: 10.**np.poly1d(fit)(np.log10(x))
-            ax.plot(xfit,yfit(xfit),'k--',zorder=10,
-                    label=r'$F_{{\nu,\rm C}} \propto \nu^{{({0:.2f}\pm{1:.2f})}}$'.format(fit[0],np.sqrt(cov[0,0])))
+            #
+            #fit,cov = np.polyfit(np.log10(xdata),np.log10(ydata),1,
+            #                     w=np.log(10.)*ydata/e_ydata,cov=True)
+            #yfit = lambda x: 10.**np.poly1d(fit)(np.log10(x))
+            #ax.plot(xfit,yfit(xfit),'k--',zorder=10,
+            #        label=r'$F_{{\nu,\rm C}} \propto \nu^{{({0:.2f}\pm{1:.2f})}}$'.format(fit[0],np.sqrt(cov[0,0])))
+            fit,cov = curve_fit(power_law, xdata, ydata, method='trf', loss='soft_l1')
+            yfit = power_law(xfit,fit[0],fit[1])
+            ax.plot(xfit,yfit,'k--',zorder=10,
+                    label=r'$F_{{\nu,\rm C}} \propto \nu^{{({0:.2f}\pm{1:.2f})}}$'.format(fit[1],np.sqrt(cov[1,1])))
             ax.legend(loc='upper right',fontsize=10)
+            #
+            # plot residuals
+            #
+            residuals = ydata - power_law(xdata,fit[0],fit[1])
+            r2 = 1. - np.sum(residuals**2.)/np.sum((ydata-np.mean(ydata))**2.)
+            res_ax.errorbar(xdata,residuals,yerr=e_ydata,fmt='o',color='k')
+            res_ax.annotate(r"R^2 = {0:.1f}".format(r2),xy=(0.1,0.8),xycoords='axes fraction')
         except:
             # fit failed
             pass
@@ -106,6 +139,9 @@ def main(contfile,label,title=None,fluxtype='peak',
                     [total['cont']-total['rms'],total['cont']-total['rms']],
                     [total['cont']+total['rms'],total['cont']+total['rms']],
                     color='k',alpha=0.5,edgecolor='none')
+    #
+    # Set plot axes
+    #
     ax.set_xlim(freqmin,freqmax)
     ax.set_xlabel('Frequency (MHz)')
     if fluxtype == 'flux':
@@ -113,6 +149,15 @@ def main(contfile,label,title=None,fluxtype='peak',
     else:
         ax.set_ylabel('Flux Density (mJy/beam)')
     ax.set_title(title)
+    #
+    # Set residual plot axes
+    #
+    res_ax.axhline(0.,color='k',lw=1.5)
+    res_ax.set_xlabel('Frequency (MHz)')
+    if fluxtype == 'flux':
+        ax.set_ylabel('Residual (mJy)')
+    else:
+        ax.set_ylabel('Residual (mJy/beam)')    
     fig.tight_layout()
     fig.savefig('{0}.cont_sed.pdf'.format(label))
     plt.close(fig)
