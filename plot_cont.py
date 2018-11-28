@@ -131,7 +131,7 @@ def main(contfile,label,title=None,fluxtype='peak',
             residuals = ydata - yfit(xdata)
             r2 = 1. - np.sum(residuals**2.)/np.sum((ydata-np.mean(ydata))**2.)
             res_ax.errorbar(xdata,residuals,yerr=e_ydata,fmt='o',color='k')
-            res_ax.annotate(r"$R^2$ = {0:.1f}".format(r2),xy=(0.1,0.8),xycoords='axes fraction')
+            res_ax.annotate(r"$R^2$ = {0:.1f}".format(r2),xy=(0.02,0.8),xycoords='axes fraction',fontsize=10)
         except:
             # fit failed
             pass
@@ -156,12 +156,8 @@ def main(contfile,label,title=None,fluxtype='peak',
     #
     res_ax.axhline(0.,color='k',lw=1.5)
     res_ax.set_xlabel('Frequency (MHz)')
-    if fluxtype == 'flux':
-        ax.set_ylabel('Residual (mJy)')
-    else:
-        ax.set_ylabel('Residual (mJy/beam)')
     fig.tight_layout()
-    fig.subplots_adjust(hspace=0.001)
+    fig.subplots_adjust(hspace=0.1)
     fig.savefig('{0}.cont_sed.pdf'.format(label))
     plt.close(fig)
     print("Done!")
