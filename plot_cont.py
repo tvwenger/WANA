@@ -119,7 +119,7 @@ def main(contfile,label,title=None,fluxtype='peak',
             #ax.plot(xfit,yfit(xfit),'k--',zorder=10,
             #        label=r'$F_{{\nu,\rm C}} \propto \nu^{{({0:.2f}\pm{1:.2f})}}$'.format(fit[0],np.sqrt(cov[0,0])))
             fit,cov = curve_fit(line, np.log10(xdata), np.log10(ydata),
-                                sigma = np.log(10.)*ydata/e_ydata, absolute_sigma=True,
+                                sigma = e_ydata/(np.log(10.)*ydata), absolute_sigma=True,
                                 method='trf', loss='soft_l1')
             yfit = lambda x: 10.**line(np.log10(x),fit[0],fit[1])
             ax.plot(xfit,yfit(xfit),'k--',zorder=10,
@@ -145,7 +145,7 @@ def main(contfile,label,title=None,fluxtype='peak',
     # Set plot axes
     #
     ax.set_xlim(freqmin,freqmax)
-    ax.set_xlabel('Frequency (MHz)')
+    #ax.set_xlabel('Frequency (MHz)')
     if fluxtype == 'flux':
         ax.set_ylabel('Flux Density (mJy)')
     else:
@@ -159,8 +159,9 @@ def main(contfile,label,title=None,fluxtype='peak',
     if fluxtype == 'flux':
         ax.set_ylabel('Residual (mJy)')
     else:
-        ax.set_ylabel('Residual (mJy/beam)')    
+        ax.set_ylabel('Residual (mJy/beam)')
     fig.tight_layout()
+    fig.subplots_adjust(hspace=0.001)
     fig.savefig('{0}.cont_sed.pdf'.format(label))
     plt.close(fig)
     print("Done!")
