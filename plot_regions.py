@@ -240,7 +240,7 @@ def main(field,spws,
             # plot them
             wisedata = wisedata[good]
             for dat in wisedata:
-                xpos,ypos = wcs_celest.wcs_world2pix(dat['RA'],dat['Dec'],0)
+                xpos,ypos = wcs_celest.wcs_world2pix(dat['RA'],dat['Dec'],1)
                 size = dat['Size']*2./3600./pixsize
                 ell = Ellipse((xpos,ypos),size,size,
                                color='y',fill=False,linestyle='dashed',zorder=100)

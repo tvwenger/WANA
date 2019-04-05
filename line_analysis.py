@@ -452,10 +452,12 @@ class ClickPlot:
         smoy = gaussian_filter(ydata,sigma=3.)
         self.ax.plot(xdata,smoy,'g-')
         self.fig.show()
-        outliers = np.isnan(ydata)
+        missing = np.isnan(ydata)
+        outliers = np.array([False]*len(ydata))
         while True:
-            rms = 1.4826*np.median(np.abs(smoy[~outliers]-np.mean(smoy[~outliers])))
-            new_outliers = (np.abs(smoy) > 5.*rms) | np.isnan(ydata)
+            exclude = missing+outliers
+            rms = 1.4826*np.median(np.abs(smoy[~exclude]-np.mean(smoy[~exclude])))
+            new_outliers = (np.abs(smoy) > 5.*rms)
             if np.sum(new_outliers) <= np.sum(outliers):
                 break
             outliers = new_outliers
@@ -555,7 +557,7 @@ class ClickPlot:
             args += [a,c,s]
             fwhm = 2.*np.sqrt(2.*np.log(2.))*s
             yfit = gaussian(xdata,a,c,s)
-            self.ax.plot(xdata,yfit,color+'-',
+            self.ax.plot(xdata,yfit,color=color,linestyle='-',
                          label='Amp: {0:.2f}; Center: {1:.1f}; FWHM: {2:.1f}'.format(a,c,fwhm))
         #
         # Plot combined fit (if necessary) and residuals
@@ -672,27 +674,40 @@ def dump_spec(imagename,region,fluxtype):
         # Get pixel location of coord, extract spectrum
         # N.B. Need to flip vertices to match WCS
         #
-        pix = wcs_celest.wcs_world2pix(coord.ra.deg,coord.dec.deg,0)
+        pix = wcs_celest.wcs_world2pix(coord.ra.deg,coord.dec.deg,1)
         spec = image_hdu.data[0,:,int(pix[1]),int(pix[0])]*1000. # mJy/beam
+        spec[spec == 0.] = np.nan
     #
-    # Read region file, sum spectrum region weighted by continuum
+    # Read region file, sum spectrum
     #
     else:
         region_mask = np.array(fits.open(region)[0].data[0,0],dtype=np.bool)
         cubedata = np.array([chandata*region_mask
-                             for chandata in image_hdu.data[0]])
-        cubedata = cubedata # Jy/beam
+                             for chandata in image_hdu.data[0]]) # Jy/beam
+        cubedata[cubedata == 0.] = np.nan
         #
-        # Compute weights as median continuum level in each pixel
+        # Sum spectrum
         #
-        weights = np.nanmedian(cubedata,axis=0)
-        weights = weights / np.nanmax(weights)
+        spec_nowt = np.nansum(cubedata,axis=(1,2))
+        spec_nowt = 1000.* spec_nowt / beam_pixel # mJy
+        spec_nowt[spec_nowt == 0.] = np.nan
+        #
+        # Compute weights as median continuum level in each
+        # pixel
+        #
+        cubestats = np.array([[calc_linefreestats(cubedata[:,i,j])
+                               for j in range(cubedata.shape[-2])]
+                              for i in range(cubedata.shape[-1])])
+        weights = cubestats[:,:,1] # median
         #
         # Computed weighted sum in each pixel
         #
-        spec = np.array([np.nansum(chandata * weights)
-                         for chandata in cubedata])
-        spec = 1000.* spec / beam_pixel # mJy
+        spec_wt = np.array([np.nansum(chandata * weights)
+                            for chandata in cubedata])
+        spec_wt = 1000.* spec_wt / beam_pixel # mJy
+        spec_wt[spec_wt == 0.] = np.nan
+        # re-normalize to continuum le
+        spec = spec_wt * np.nanmedian(spec_nowt)/np.nanmedian(spec_wt)
         #print(spec)
     #
     # Save spectrum to file
@@ -892,17 +907,17 @@ def fit_line(title,region,fluxtype,specdata,outfile,auto=False):
         logger.info("Done.")
     #
     # Check that line parameters are sane:
-    # - centers are not within 2*FWHM of edge
+    # - centers are not within FWHM of edge
     # - FWHM are not < 5 km/s
-    # - FWHM are not > 150 km/s
-    # - intensity and FWHM errors are not > 50%
+    # - FWHM are not > 200 km/s
+    # - intensity and FWHM errors are not > 100%
     #
     for ngauss in range(len(line_brightness)):
-        if ((line_center[ngauss] - 2.*line_fwhm[ngauss] < np.min(specdata_velocity)) or
-            (line_center[ngauss] + 2.*line_fwhm[ngauss] > np.max(specdata_velocity)) or
-            (line_fwhm[ngauss] < 5.) or (line_fwhm[ngauss] > 150.) or
-            (e_line_brightness[ngauss]/line_brightness[ngauss] > 0.5) or
-            (e_line_fwhm[ngauss]/line_fwhm[ngauss] > 0.5)):
+        if ((line_center[ngauss] - line_fwhm[ngauss] < np.min(specdata_velocity)) or
+            (line_center[ngauss] + line_fwhm[ngauss] > np.max(specdata_velocity)) or
+            (line_fwhm[ngauss] < 5.) or (line_fwhm[ngauss] > 200.) or
+            (e_line_brightness[ngauss]/line_brightness[ngauss] > 1.0) or
+            (e_line_fwhm[ngauss]/line_fwhm[ngauss] > 1.0)):
             line_brightness[ngauss] = np.nan
             e_line_brightness[ngauss] = np.nan
             line_center[ngauss] = np.nan
@@ -922,18 +937,28 @@ def fit_line(title,region,fluxtype,specdata,outfile,auto=False):
     return (line_brightness, e_line_brightness, line_fwhm, e_line_fwhm,
             line_center, e_line_center, cont_brightness, rms)
 
-def calc_rms(ydata):
+def calc_linefreestats(ydata):
     """
-    Automatically find line-free regions to calculate RMS.
+    Automatically find line-free regions to calculate statistics
+    (mean, median, rms)
 
     Inputs: ydata
       ydata :: 1-D array of scalars
         The data
 
-    Returns: rms
+    Returns: mean, median, rms
+      mean :: scalar
+        The mean of the line-free regions of ydata
+      median :: scalar
+        The median of the line-free regions of ydata
       rms :: scalar
         The RMS of line-free regions of ydata
     """
+    #
+    # Check that all data isn't nans
+    #
+    if np.all(np.isnan(ydata)):
+        return np.nan, np.nan, np.nan
     xdata = np.arange(len(ydata))
     #
     # Get line-free channels by fitting a 3rd order polynomial baseline and
@@ -954,8 +979,10 @@ def calc_rms(ydata):
     #
     # line-free channels are those without outliers
     #
+    mean = np.mean(ydata[~outliers])
+    median = np.median(ydata[~outliers])
     rms = np.std(ydata[~outliers])
-    return rms
+    return mean, median, rms
 
 def calc_te(line_brightness, e_line_brightness, line_fwhm, e_line_fwhm,
         line_center, e_line_center, cont_brightness, rms, freq):
@@ -1125,7 +1152,7 @@ def main(field,regions,spws,pdflabel,stackedspws=[],stackedlabels=[],
             lineid = alllineids[alllinespws.index(spw)]
             restfreq = float(allrestfreqs[alllinespws.index(spw)].replace('MHz',''))
             imagetitle = imagename.replace('spw{0}'.format(spw),lineid)
-            outfile = imagename.replace('spw{0}'.format(spw),lineid).replace('.fits','{0}.spec.pdf'.format(region))
+            outfile = imagename.replace('spw{0}'.format(spw),lineid).replace('.fits','.{0}.spec.pdf'.format(region))
             #
             # extract spectrum
             #
@@ -1138,7 +1165,8 @@ def main(field,regions,spws,pdflabel,stackedspws=[],stackedlabels=[],
             #
             spws_forstack.append(spw)
             specdata_forstack.append(specdata)
-            weights_forstack.append(np.nanmean(specdata['flux'])/calc_rms(specdata['flux'])**2.)
+            spec_mean, spec_median, spec_rms = calc_linefreestats(specdata['flux'])
+            weights_forstack.append(np.nanmean(specdata['flux'])/spec_rms**2.)
             #
             # fit line
             #

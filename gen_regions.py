@@ -33,6 +33,7 @@ from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
 from scipy import ndimage as nd
+from scipy.signal import convolve2d
 from skimage.morphology import watershed
 from skimage.draw import ellipse
 
@@ -131,7 +132,7 @@ def main(field,spws,taper=False,imsmooth=False,
         #
         peak_pixels = []
         for peak_position in peak_positions:
-            pixel = wcs_celest.wcs_world2pix(peak_position.ra.deg,peak_position.dec.deg,0)
+            pixel = wcs_celest.wcs_world2pix(peak_position.ra.deg,peak_position.dec.deg,1)
             peak_pixels.append((int(pixel[1]),int(pixel[0])))
         #
         # Create seed array for watershed
@@ -140,24 +141,13 @@ def main(field,spws,taper=False,imsmooth=False,
         for i,peak_pixel in enumerate(peak_pixels):
             seed_locations[peak_pixel[0],peak_pixel[1]] = i+1
         #
-        # Create watershed connectivity on scale of synthesized beam
-        #
-        connectivity = np.zeros((101,101),dtype=int)
-        xcen = ycen = len(connectivity)/2.
-        smaj = image_hdu.header['BMAJ']/image_hdu.header['CDELT2']/2.
-        smin = image_hdu.header['BMIN']/image_hdu.header['CDELT2']/2.
-        pa = np.deg2rad(-1.*image_hdu.header['BPA']+90.)
-        xell,yell = ellipse(xcen,ycen,smin,smaj,rotation=pa)
-        connectivity[xell,yell] = 1
-        #
         # Compute distance to background
         #
         distance = nd.distance_transform_edt(image_data)
         #
         # Perform watershed segmentation
         #
-        result = watershed(-distance,seed_locations,
-                           connectivity=connectivity,mask=image_data>0.)
+        result = watershed(-distance,seed_locations,mask=image_data>0.)
         #
         # For each peak region, find associated watershed region
         # and save as boolean mask fits image

@@ -91,10 +91,12 @@ def gauss_guess(xdata, ydata):
     #
     # Get outliers to identify line region
     #
-    outliers = np.isnan(ydata)
+    missing = np.isnan(ydata)
+    outliers = np.array([False]*len(ydata))
     while True:
-        rms = 1.4826*np.median(np.abs(ydata[~outliers]-np.mean(ydata[~outliers])))
-        new_outliers = (np.abs(ydata) > 3.*rms) | np.isnan(ydata)
+        exclude = missing+outliers
+        rms = 1.4826*np.median(np.abs(ydata[~exclude]-np.mean(ydata[~exclude])))
+        new_outliers = (np.abs(ydata) > 3.*rms)
         if np.sum(new_outliers) <= np.sum(outliers):
             break
         outliers = new_outliers
@@ -246,71 +248,82 @@ def process(field, spw, uvtaper=False, imsmooth=False):
     velocities = ((all_chans+1-chanhdu[0].header['CRPIX3'])*chanhdu[0].header['CDELT3']+chanhdu[0].header['CRVAL3'])/1000.
     velocity_width = chanhdu[0].header['CDELT3']/1000.
     #
-    # Loop over all pixels in image
+    # Loop over all un-masked pixels in image
     #
-    for x in range(clipchan.shape[2]):
-        for y in range(clipchan.shape[3]):
-            #
-            # Skip if this is masked
-            #
-            if np.all(np.isnan(clipchan[0,:,x,y])):
-                continue
-            #
-            # Find line-free regions
-            #
-            chan, flux = line_free(all_chans,clipchan[0,:,x,y])
-            if len(chan) == 0:
-                # all nan
-                continue
-            #
-            # Fit and remove 3rd order polynomial background
-            #
-            pfit = np.polyfit(chan, flux, 3)
-            yfit = np.poly1d(pfit)
-            flux_contsub = clipchan[0,:,x,y]-yfit(all_chans)
-            contsub[0, :, x, y] = flux_contsub
-            #
-            # Compute continuum flux and rms
-            #
-            contmedian[x, y] = np.median(flux)
-            contchans[x, y] = len(chan)
-            specrms[x, y] = 1.4826*(np.median(np.abs(flux-np.mean(flux))))
-            #
-            # Estimate line parameters
-            #
-            start, peak, center, sigma, end = gauss_guess(velocities, flux_contsub)
-            if start is None:
-                # no obvious line
-                continue
-            #
-            # Fit Gaussian
-            #
-            bounds_lower = [0, start, 0]
-            bounds_upper = [np.inf, end, np.inf]
-            bounds = (bounds_lower,bounds_upper)
-            p0 = (peak, center, sigma)
-            try:
-                popt,pcov = curve_fit(gaussian,velocities,flux_contsub,
-                                      p0=p0,bounds=bounds)
-            except:
-                # fit failed
-                continue
-            #
-            # Save fit and fit errors
-            #
-            lineflux[x,y] = popt[0]
-            e_lineflux[x,y] = np.sqrt(pcov[0,0])
-            linevlsr[x,y] = popt[1]
-            e_linevlsr[x,y] = np.sqrt(pcov[1,1])
-            linefwhm[x,y] = popt[2]*2.*np.sqrt(2.*np.log(2.))
-            e_linefwhm[x,y] = np.sqrt(pcov[2,2])*2.*np.sqrt(2.*np.log(2.))
-            #
-            # Sum spectrum from -3sigma to 3sigma
-            #
-            startind = np.argmin(np.abs(velocities-(popt[1]-3*popt[2])))
-            endind = np.argmin(np.abs(velocities-(popt[1]+3*popt[2])))
-            linesum[x,y] = np.sum(flux_contsub[startind:endind])*velocity_width
-            linechans[x,y] = endind-startind
+    foo,bar,xnotmask,ynotmask = np.where(~np.isnan(clipmfs))
+    for x,y in zip(xnotmask,ynotmask):
+        #
+        # Find line-free regions
+        #
+        chan, flux = line_free(all_chans,clipchan[0,:,x,y])
+        if len(chan) == 0:
+            # all nan
+            continue
+        #
+        # Fit and remove 3rd order polynomial background
+        #
+        pfit = np.polyfit(chan, flux, 3)
+        yfit = np.poly1d(pfit)
+        flux_contsub = clipchan[0,:,x,y]-yfit(all_chans)
+        contsub[0, :, x, y] = flux_contsub
+        #
+        # Compute continuum flux and rms
+        #
+        contmedian[x, y] = np.median(flux)
+        contchans[x, y] = len(chan)
+        specrms[x, y] = 1.4826*(np.median(np.abs(flux-np.mean(flux))))
+        #
+        # Estimate line parameters
+        #
+        start, peak, center, sigma, end = gauss_guess(velocities, flux_contsub)
+        if start is None:
+            # no obvious line
+            continue
+        #
+        # Fit Gaussian
+        #
+        bounds_lower = [0, start, 0]
+        bounds_upper = [np.inf, end, np.inf]
+        bounds = (bounds_lower,bounds_upper)
+        p0 = (peak, center, sigma)
+        isnan = np.isnan(flux_contsub)
+        try:
+            popt,pcov = curve_fit(gaussian,velocities[~isnan],
+                                  flux_contsub[~isnan],
+                                  p0=p0,bounds=bounds)
+        except:
+            # fit failed
+            continue
+        #
+        # Check that line parameters are sane
+        # - center is not within FWHM of edge
+        # - FWHM are not < 5 km/s
+        # - FWHM are not > 150 km/s
+        # - intensity and FWHM errors are not > 100%
+        #
+        if ((popt[1] - popt[2] < np.min(velocities)) or
+            (popt[1] + popt[2] > np.max(velocities)) or
+            (popt[2]*2.*np.sqrt(2.*np.log(2.)) < 5.) or
+            (popt[2]*2.*np.sqrt(2.*np.log(2.)) > 150.) or
+            (np.sqrt(pcov[0,0])/popt[0] > 1.0) or
+            (np.sqrt(pcov[2,2])/popt[2] > 1.0)):
+            continue
+        #
+        # Save fit and fit errors
+        #
+        lineflux[x,y] = popt[0]
+        e_lineflux[x,y] = np.sqrt(pcov[0,0])
+        linevlsr[x,y] = popt[1]
+        e_linevlsr[x,y] = np.sqrt(pcov[1,1])
+        linefwhm[x,y] = popt[2]*2.*np.sqrt(2.*np.log(2.))
+        e_linefwhm[x,y] = np.sqrt(pcov[2,2])*2.*np.sqrt(2.*np.log(2.))
+        #
+        # Sum spectrum from -3sigma to 3sigma
+        #
+        startind = np.argmin(np.abs(velocities-(popt[1]-3*popt[2])))
+        endind = np.argmin(np.abs(velocities-(popt[1]+3*popt[2])))
+        linesum[x,y] = np.sum(flux_contsub[startind:endind])*velocity_width
+        linechans[x,y] = endind-startind
     #
     # Save images
     #
@@ -466,9 +479,13 @@ def main(field,spws='',uvtaper=False,imsmooth=False,stack=False):
             if not os.path.exists(mfsimage):
                 continue
             mfshdu = fits.open(mfsimage)
-            mfsdata.append(mfshdu[0].data)
+            mymfsdata = mfshdu[0].data
+            mymfsdata[mymfsdata == 0.] = np.nan
+            mfsdata.append(mymfsdata)
             chanimage = '{0}.spw{1}.channel.{2}.image.fits'.format(field,spw,linetype)
             chanhdu = fits.open(chanimage)
+            mychandata = chanhdu[0].data
+            mychandata[mychandata == 0.] = np.nan
             chandata.append(chanhdu[0].data)
             freqs.append(mfshdu[0].header['RESTFRQ'])
         #
@@ -503,7 +520,6 @@ def main(field,spws='',uvtaper=False,imsmooth=False,stack=False):
     tesum_plots = []
     tefit_plots = []
     for plot in goodplots:
-        print(plot)
         plottype = plot[0]
         spw = plot[1]
         fitsfname = plot[2]
@@ -656,5 +672,3 @@ def main(field,spws='',uvtaper=False,imsmooth=False,stack=False):
                 f.write(r"\clearpage"+"\n")
             f.write(r"\end{document}")
         os.system('pdflatex -interaction=batchmode {0}'.format(fname))
-    
-    

@@ -154,7 +154,7 @@ def main(field,regions,spws,
                 #
                 area_pixel = 1.
                 area_arcsec = pixel_size
-                pix = wcs_celest.wcs_world2pix(coord.ra.deg,coord.dec.deg,0)
+                pix = wcs_celest.wcs_world2pix(coord.ra.deg,coord.dec.deg,1)
                 cont = 1000.*image_hdu.data[0,0,int(pix[1]),int(pix[0])] # mJy/beam
                 #
                 # Compute primary beam corrected rms at peak location
