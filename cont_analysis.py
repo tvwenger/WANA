@@ -173,7 +173,9 @@ def main(field,regions,spws,
                 cont = 1000.*np.sum(image_hdu.data[0,0,region_mask])/beam_pixel # mJy
                 #
                 # Compute primary beam corrected rms
+                # Since noise is spatially correlated on beam scales
+                # rms = mJy/beam*pixels / beam_area_pixels * (region_area/beam_area) 
                 #
-                rms = 1000.*np.sqrt(np.sum(image_rms[region_mask]**2.))/beam_pixel # mJy
+                rms = 1000.*np.sqrt(np.sum(image_rms[region_mask]**2.))/beam_pixel * (area_pixel/beam_pixel)# mJy
                 # spw  frequency   cont       rms      area_arcsec area_pixel beam_arcsec beam_pixel
             f.write(rowfmt.format(spw.replace('spw',''),frequency,cont,rms,area_arcsec,area_pixel,beam_arcsec,beam_pixel))
