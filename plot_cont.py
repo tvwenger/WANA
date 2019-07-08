@@ -82,7 +82,7 @@ def main(contfile,label,title=None,fluxtype='peak',
     #
     # Read data
     #
-    data = np.genfromtxt(contfile,dtype=None,names=True)
+    data = np.genfromtxt(contfile,dtype=None,names=True,encoding='UTF-8')
     #
     # Determine which is total continuum data
     #
@@ -93,7 +93,7 @@ def main(contfile,label,title=None,fluxtype='peak',
     #
     xfit = np.linspace(freqmin,freqmax,100)
     #
-    # Plot continuum SED and fit residuals
+    # Plot continuum SED and residuals
     #
     print("Plotting continuum SED...")
     plt.ioff()
@@ -102,7 +102,7 @@ def main(contfile,label,title=None,fluxtype='peak',
     isnan = ((np.isnan(data['cont'])) | (data['cont'] <= 0.))
     xdata = data['frequency'][~is_total*~isnan]
     ydata = data['cont'][~is_total*~isnan]
-    e_ydata = data['rms'][~is_total*~isnan]
+    e_ydata = data['e_cont_A'][~is_total*~isnan]
     # plot data
     ax.errorbar(xdata,ydata,yerr=e_ydata,fmt='o',color='k')
     #
@@ -113,11 +113,6 @@ def main(contfile,label,title=None,fluxtype='peak',
             #
             # fit power law
             #
-            #fit,cov = np.polyfit(np.log10(xdata),np.log10(ydata),1,
-            #                     w=np.log(10.)*ydata/e_ydata,cov=True)
-            #yfit = lambda x: 10.**np.poly1d(fit)(np.log10(x))
-            #ax.plot(xfit,yfit(xfit),'k--',zorder=10,
-            #        label=r'$F_{{\nu,\rm C}} \propto \nu^{{({0:.2f}\pm{1:.2f})}}$'.format(fit[0],np.sqrt(cov[0,0])))
             fit,cov = curve_fit(line, np.log10(xdata), np.log10(ydata),
                                 sigma = e_ydata/(np.log(10.)*ydata), absolute_sigma=True,
                                 method='trf', loss='soft_l1')
@@ -131,22 +126,21 @@ def main(contfile,label,title=None,fluxtype='peak',
             residuals = ydata - yfit(xdata)
             r2 = 1. - np.sum(residuals**2.)/np.sum((ydata-np.mean(ydata))**2.)
             res_ax.errorbar(xdata,residuals,yerr=e_ydata,fmt='o',color='k')
-            res_ax.annotate(r"$R^2$ = {0:.1f}".format(r2),xy=(0.02,0.8),xycoords='axes fraction',fontsize=10)
+            res_ax.annotate(r"$R^2$ = {0:.2f}".format(r2),xy=(0.02,0.8),xycoords='axes fraction',fontsize=10)
         except:
             # fit failed
             pass
     # plot total continuum
     ax.plot([freqmin,freqmax],[total['cont'],total['cont']],'k-')
     ax.fill_between([freqmin,freqmax],
-                    [total['cont']-total['rms'],total['cont']-total['rms']],
-                    [total['cont']+total['rms'],total['cont']+total['rms']],
+                    [total['cont']-total['e_cont_A'],total['cont']-total['e_cont_A']],
+                    [total['cont']+total['e_cont_A'],total['cont']+total['e_cont_A']],
                     color='k',alpha=0.5,edgecolor='none')
     #
     # Set plot axes
     #
     ax.set_xlim(freqmin,freqmax)
-    #ax.set_xlabel('Frequency (MHz)')
-    if fluxtype == 'flux':
+    if fluxtype == 'total':
         ax.set_ylabel('Flux Density (mJy)')
     else:
         ax.set_ylabel('Flux Density (mJy/beam)')

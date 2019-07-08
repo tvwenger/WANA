@@ -706,7 +706,7 @@ def dump_spec(imagename,region,fluxtype):
                             for chandata in cubedata])
         spec_wt = 1000.* spec_wt / beam_pixel # mJy
         spec_wt[spec_wt == 0.] = np.nan
-        # re-normalize to continuum le
+        # re-normalize to continuum level
         spec = spec_wt * np.nanmedian(spec_nowt)/np.nanmedian(spec_wt)
         #print(spec)
     #
@@ -885,7 +885,8 @@ def fit_line(title,region,fluxtype,specdata,outfile,auto=False):
             bounds = (bounds_lower,bounds_upper)
             popt,pcov = curve_fit(gaussian,line_velocity,line_flux,
                                   p0=p0,bounds=bounds,
-                                  sigma=np.ones(line_flux.size)*rms)
+                                  sigma=np.ones(line_flux.size)*rms,
+                                  absolute_sigma=True)
             line_brightness = popt[0::3]
             e_line_brightness = np.sqrt(np.diag(pcov)[0::3])
             line_center = popt[1::3]
