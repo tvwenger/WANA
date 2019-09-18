@@ -24,6 +24,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 Changelog:
 Trey V. Wenger November 2018 - V1.0
+
+Trey V. Wenger September 2019 -V2.0
+    Update for WISP V2.0 with stokes parameter support
+    Add smoothing and re-gridding
 """
 
 import os
@@ -733,6 +737,41 @@ def dump_spec(imagename,region,fluxtype):
     else:
         return specdata
 
+def smooth_regrid(specdata, velocity):
+    """
+    Smooth and re-grid a spectrum to a common velocity grid.
+    Uses sinc function for smoothing and re-gridding.
+    
+    Inputs: specdata, velocity
+      specdata :: ndarray
+        array with columns 'channel', 'velocity', and 'flux'
+      smogrid_start :: 1-D array of scalars
+        The new velocity axis at which to interpolate velocities
+
+    Returns: specdata
+      specdata :: ndarray
+        array with columns 'channel', 'velocity', and 'flux'
+    """
+    smogrid_res = velocity[1]-velocity[0]
+    original_res = specdata['velocity'][1] - specdata['velocity'][0]
+    if smogrid_res < original_res:
+        raise ValueError("Cannot smooth to a finer resolution!")
+    # construct sinc weights, and catch out of bounds
+    sinc_wts = np.array([np.sinc((v-specdata['velocity'])/smogrid_res)
+                         if (specdata['velocity'][0] < v < specdata['velocity'][-1])
+                         else np.zeros(len(specdata['velocity']))*np.nan
+                         for v in velocity])
+    flux = np.array([np.sum(wt*specdata['flux'])/np.sum(wt)
+                     for wt in sinc_wts])
+    channel = np.arange(len(velocity))
+    new_specdata = np.zeros((len(velocity)),
+                            dtype=[('channel', '<i8'), ('velocity', '<f8'),
+                                   ('flux', '<f8')])
+    new_specdata['channel'] = channel
+    new_specdata['velocity'] = velocity
+    new_specdata['flux'] = flux
+    return new_specdata
+    
 def fit_line(title,region,fluxtype,specdata,outfile,auto=False):
     """
     Fit gaussian to RRL.
@@ -1030,7 +1069,9 @@ def calc_te(line_brightness, e_line_brightness, line_fwhm, e_line_fwhm,
     e_te = 0.87*te*np.sqrt(e_line_fwhm**2./line_fwhm**2. + rms**2./cont_brightness**2. + e_line_brightness**2./line_brightness**2.)
     return (line_to_cont, e_line_to_cont, te, e_te)
 
-def main(field,regions,spws,pdflabel,stackedspws=[],stackedlabels=[],
+def main(field,regions,spws,pdflabel,stokes='I',
+         stackedspws=[],stackedlabels=[],
+         smogrid_start=None, smogrid_res=None, smogrid_end=None,
          fluxtype='peak',taper=False,imsmooth=False,
          weight=True,outfile='line_info.txt',
          config_file=None,auto=False):
@@ -1050,11 +1091,28 @@ def main(field,regions,spws,pdflabel,stackedspws=[],stackedlabels=[],
       pdflabel :: string
         How to name spectra pdf. Filenames are like
         <pdflabel>.clean.<taper>.pbcor.<imsmooth>.wt.spectra.pdf
+      stokes :: string
+        The Stokes parameters saved in the images
       stackedspws :: list of strings
         List of comma-separated spws to stack, one element for each
         stack group
       stackedlabels :: list of strings
         The label for each stack group
+      smogrid_start :: scalar
+        The starting velocity of the re-gridded velocity axis.
+        If None, the data aren't regridded, except for the stacked
+        spectrum which uses the parameters of the worst resolution
+        spectral window.
+      smogrid_res :: scalar
+        The resolution of the smoothed and re-gridded velocity axis.
+        If None, the data aren't regridded, except for the stacked
+        spectrum which uses the parameters of the worst resolution
+        spectral window.
+      smogrid_end :: scalar
+        The ending velocity of the re-gridded velocity axis.
+        If None, the data aren't regridded, except for the stacked
+        spectrum which uses the parameters of the worst resolution
+        spectral window.
       fluxtype :: string
         What type of flux to measure. 'peak' to use peak regions and
         measure peak flux density, 'total' to use full regions and
@@ -1105,6 +1163,13 @@ def main(field,regions,spws,pdflabel,stackedspws=[],stackedlabels=[],
     alllineids = config.get("Clean","lineids").split(',')
     allrestfreqs = config.get("Clean","restfreqs").split(',')
     #
+    # Get smoothed and interpolated velocity axis
+    #
+    smogrid_velocity = None
+    if smogrid_res is not None:
+        smogrid_velocity = np.arange(smogrid_start, smogrid_end+smogrid_res,
+                                     smogrid_res)
+    #
     # Set-up file
     #
     with open(outfile,'w') as f:
@@ -1129,17 +1194,16 @@ def main(field,regions,spws,pdflabel,stackedspws=[],stackedlabels=[],
                                  fluxunit,fluxunit,'km/s','km/s',
                                  fluxunit,fluxunit,'','','K','K',''))
         #
-        # Fit RRLs
+        # Fit RRLs, save spectra for stacking
         #
         goodplots = []
-        spws_forstack = []
-        specdata_forstack = []
-        weights_forstack = []
+        all_spws = []
+        all_specdata = []
         for spw,region in zip(spws,regions):
             #
             # Check cube exists
             #
-            imagename = '{0}.spw{1}.channel.clean'.format(field,spw)
+            imagename = '{0}.spw{1}.{2}.channel.clean'.format(field,spw,stokes)
             if taper: imagename += '.uvtaper'
             imagename += '.pbcor'
             if imsmooth: imagename += '.imsmooth'
@@ -1157,17 +1221,20 @@ def main(field,regions,spws,pdflabel,stackedspws=[],stackedlabels=[],
             #
             # extract spectrum
             #
-            specdata = dump_spec(imagename,region,fluxtype)
+            specdata = dump_spec(imagename, region, fluxtype)
             if specdata is None:
                 # outside of primary beam
                 continue
             #
+            # Smooth and re-grid
+            #
+            if smogrid_velocity is not None:
+                specdata = smooth_regrid(specdata, smogrid_velocity)
+            #
             # Save data for stacking
             #
-            spws_forstack.append(spw)
-            specdata_forstack.append(specdata)
-            spec_mean, spec_median, spec_rms = calc_linefreestats(specdata['flux'])
-            weights_forstack.append(np.nanmean(specdata['flux'])/spec_rms**2.)
+            all_spws.append(spw)
+            all_specdata.append(specdata)
             #
             # fit line
             #
@@ -1180,7 +1247,7 @@ def main(field,regions,spws,pdflabel,stackedspws=[],stackedlabels=[],
             #
             # Compute line SNR
             #
-            channel_width = config.getfloat("Clean","width")
+            channel_width = specdata['velocity'][1]-specdata['velocity'][0]
             linesnr = 0.7*line_brightness/rms * (line_fwhm/channel_width)**0.5
             #
             # calc Te
@@ -1224,39 +1291,68 @@ def main(field,regions,spws,pdflabel,stackedspws=[],stackedlabels=[],
         #
         # Fit stacked RRLs
         #
-        specdata_forstack = np.array(specdata_forstack)
-        weights_forstack = np.array(weights_forstack)
-        for my_stackedspws, stackedlabel in zip(stackedspws,stackedlabels):
+        all_specdata = np.array(all_specdata)
+        for my_stackedspws, stackedlabel in zip(stackedspws, stackedlabels):
+            #
+            # Get specdata for the spws in this stack
+            #
+            stack_spws = my_stackedspws.split(',')
+            stack_inds = np.array([all_spws.index(spw) for spw in stack_spws])
+            if len(stack_inds) == 0:
+                continue
+            stack_specdata = all_specdata[stack_inds]
+            #
+            # If not already re-gridding, we need to re-grid all
+            # spectra to worst resolution
+            #
+            stack_start = None
+            stack_res = 0.
+            stack_end = None
+            if smogrid_res is None:
+                for specdata in stack_specdata:
+                    vel_res = specdata['velocity'][1]-specdata['velocity'][0]
+                    if vel_res > stack_res:
+                        stack_start = np.min(specdata['velocity'])
+                        stack_res = vel_res
+                        stack_end = np.max(specdata['velocity'])
+                stack_velocity = np.arange(stack_start, stack_end+stack_res,
+                                           stack_res)
+                stack_specdata = np.array([smooth_regrid(specdata, stack_velocity)
+                                           for specdata in stack_specdata])
+            else:
+                stack_res = smogrid_res
             #
             # Get restfreqs for this stack
             #
-            my_stackedspws = my_stackedspws.split(',')
-            stack_restfreqs = np.array([float(allrestfreqs[alllinespws.index(spw)].replace('MHz','')) for spw in my_stackedspws
-                                        if spw in spws_forstack])
+            stack_restfreqs = np.array([float(allrestfreqs[alllinespws.index(spw)].replace('MHz',''))
+                                        for spw in stack_spws])
             #
             # Compute average specdata for this stack
             #
-            my_stackinds = np.array([spws_forstack.index(spw) for spw in my_stackedspws
-                                     if spw in spws_forstack])
-            if len(my_stackinds) == 0:
-                continue
             if weight:
-                specaverage=np.average(specdata_forstack[my_stackinds]['flux'],axis=0,
-                                       weights=weights_forstack[my_stackinds])
-                stackedrestfreq = np.average(stack_restfreqs,weights=weights_forstack[my_stackinds])
+                # Get data weights
+                stack_weights = []
+                for specdata in stack_specdata:
+                    spec_mean, spec_median, spec_rms = calc_linefreestats(specdata['flux'])
+                    stack_weights.append(spec_median/spec_rms**2.)
+                stack_weights = np.array(stack_weights)
+                specaverage=np.average(stack_specdata['flux'], axis=0,
+                                       weights=stack_weights)
+                stackedrestfreq = np.average(stack_restfreqs,
+                                             weights=stack_weights)
             else:
-                specaverage=np.average(specdata_forstack[my_stackinds]['flux'],axis=0)
+                specaverage=np.average(stack_specdata['flux'], axis=0)
                 stackedrestfreq = np.average(stack_restfreqs)
             #
             # Store stacked spectrum by replacing flux column of
             # one of the original specdata (to retain velocity column)
             #
-            avgspecdata = specdata_forstack[my_stackinds][0]
+            avgspecdata = stack_specdata[0]
             avgspecdata['flux'] = specaverage
             #
             # Set up output filename and image title
             #
-            outfile = '{0}.{1}.channel.clean'.format(field,stackedlabel)
+            outfile = '{0}.{1}.{2}.channel.clean'.format(field,stackedlabel,stokes)
             if taper: outfile += '.uvtaper'
             outfile += '.pbcor'
             if imsmooth: outfile += '.imsmooth'
@@ -1276,8 +1372,7 @@ def main(field,regions,spws,pdflabel,stackedspws=[],stackedlabels=[],
             #
             # Compute line SNR
             #
-            channel_width = config.getfloat("Clean","width")
-            linesnr = 0.7*line_brightness/rms * (line_fwhm/channel_width)**0.5
+            linesnr = 0.7*line_brightness/rms * (line_fwhm/stack_res)**0.5
             #
             # calc Te
             #

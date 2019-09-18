@@ -24,6 +24,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 Changelog:
 Trey V. Wenger November 2018 - V1.0
+
+Trey V. Wenger September 2019 - V2.0
+   Update to WISP V2.0 including Stokes
 """
 
 import os
@@ -39,7 +42,7 @@ from skimage.draw import ellipse
 
 __version__ = "1.0"
 
-def main(field,spws,taper=False,imsmooth=False,
+def main(field,spws,stokes='I',taper=False,imsmooth=False,
          sigmaclip=3.):
     """
     Given some peak region, generate a polygon region containing
@@ -55,6 +58,8 @@ def main(field,spws,taper=False,imsmooth=False,
         the field name.
       spws :: string
         comma-separated string of spws for which to generate regions
+      stokes :: string
+        The stokes parameters in the image
       regions :: list of strings
         peak region files
       taper :: boolean
@@ -101,7 +106,7 @@ def main(field,spws,taper=False,imsmooth=False,
         #
         # Read image
         #
-        image = '{0}.{1}.mfs.clean'.format(field,spw)
+        image = '{0}.{1}.{2}.mfs.clean'.format(field, spw, stokes)
         if taper: image += '.uvtaper'
         if imsmooth: image += '.imsmooth'
         image += '.image.fits'
@@ -114,7 +119,7 @@ def main(field,spws,taper=False,imsmooth=False,
         #
         # Read residual
         #
-        residual = '{0}.{1}.mfs.clean'.format(field,spw)
+        residual = '{0}.{1}.{2}.mfs.clean'.format(field, spw, stokes)
         if taper: residual += '.uvtaper'
         if imsmooth: residual += '.imsmooth'
         residual += '.residual.fits'

@@ -23,6 +23,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 Changelog:
 Trey V. Wenger November 2018 - V1.0
+
+Trey V. Wenger September 2019 - V2.0
+    Update to WISP V2.0 to handle Stokes images
 """
 
 import os
@@ -36,7 +39,7 @@ from matplotlib.colors import LogNorm
 __version__ = "1.0"
 
 def main(field,regions,spws,label,
-         fluxtype='peak',taper=False,imsmooth=False,
+         stokes='I',fluxtype='peak',taper=False,imsmooth=False,
          skip_plot=False,outfile='cont_info.txt'):
     """
     Measure continuum flux density and rms for each source in the
@@ -51,6 +54,10 @@ def main(field,regions,spws,label,
         spw. Otherwise, the region file to use for each spw.
       spws :: string
         comma-separated string of spws to analyze
+      label :: string
+        A label to add to the filename
+      stokes :: string
+        The stokes parameters in the image
       fluxtype :: string
         What type of flux to measure. 'peak' to use peak regions and
         measure peak flux density, 'total' to use full regions and
@@ -97,7 +104,7 @@ def main(field,regions,spws,label,
             #
             # Read image
             #
-            image = '{0}.{1}.mfs.clean'.format(field,spw)
+            image = '{0}.{1}.{2}.mfs.clean'.format(field, spw, stokes)
             if taper: image += '.uvtaper'
             image += '.pbcor'
             if imsmooth: image += '.imsmooth'
@@ -136,7 +143,7 @@ def main(field,regions,spws,label,
             #
             # Read residual image
             #
-            residualimage = '{0}.{1}.mfs.clean'.format(field,spw)
+            residualimage = '{0}.{1}.{2}.mfs.clean'.format(field, spw, stokes)
             if taper: residualimage += '.uvtaper'
             if imsmooth: residualimage += '.imsmooth'
             residualimage += '.residual.fits'
@@ -145,7 +152,7 @@ def main(field,regions,spws,label,
             #
             # PB image, and PB-corrected rms
             #
-            pbimage = '{0}.{1}.mfs.pb.fits'.format(field,spw)
+            pbimage = '{0}.{1}.{2}.mfs.pb.fits'.format(field, spw, stokes)
             pb_hdu = fits.open(pbimage)[0]
             image_rms = image_rms/pb_hdu.data[0,0]
             image_rms[np.isinf(image_rms)] = np.nan

@@ -86,8 +86,10 @@ def main(contfile,label,title=None,fluxtype='peak',
     #
     # Determine which is total continuum data
     #
-    is_total = data['spw'] == 'cont'
-    total = data[is_total][0]
+    is_total = np.array(data['spw'], dtype=np.str) == 'cont'
+    total = None
+    if len(data[is_total]) > 0:
+        total = data[is_total][0]
     #
     # curve fit range
     #
@@ -131,11 +133,12 @@ def main(contfile,label,title=None,fluxtype='peak',
             # fit failed
             pass
     # plot total continuum
-    ax.plot([freqmin,freqmax],[total['cont'],total['cont']],'k-')
-    ax.fill_between([freqmin,freqmax],
-                    [total['cont']-total['e_cont_A'],total['cont']-total['e_cont_A']],
-                    [total['cont']+total['e_cont_A'],total['cont']+total['e_cont_A']],
-                    color='k',alpha=0.5,edgecolor='none')
+    if total is not None:
+        ax.plot([freqmin,freqmax],[total['cont'],total['cont']],'k-')
+        ax.fill_between([freqmin,freqmax],
+                        [total['cont']-total['e_cont_A'],total['cont']-total['e_cont_A']],
+                        [total['cont']+total['e_cont_A'],total['cont']+total['e_cont_A']],
+                        color='k',alpha=0.5,edgecolor='none')
     #
     # Set plot axes
     #
@@ -171,7 +174,8 @@ def main(contfile,label,title=None,fluxtype='peak',
         # plot beam size
         # ax.plot(data['frequency'][~is_total],data['beam_arcsec'][~is_total],'k--')
         # plot total continuum
-        ax.plot([freqmin,freqmax],[total['area_arcsec'],total['area_arcsec']],'k-')
+        if total is not None:
+            ax.plot([freqmin,freqmax],[total['area_arcsec'],total['area_arcsec']],'k-')
         ax.set_xlim(freqmin,freqmax)
         ax.set_xlabel('Frequency (MHz)')
         ax.set_ylabel(r'Size (arcsec$^2$)')

@@ -26,6 +26,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 Changelog:
 Trey V. Wenger November 2018 - V1.0
+
+Trey V. Wenger September 2019 - V2.0
+    Update for WISP V2.0 support (stokes image names)
 """
 
 import os
@@ -55,7 +58,7 @@ class HandlerEllipse(HandlerPatch):
         p.set_transform(trans)
         return [p]
 
-def main(field,spws,
+def main(field,spws,stokes='I',
          taper=False,imsmooth=False,
          wisefile=None,levels=[5.,10.,20.,50.,100.]):
     """
@@ -76,7 +79,9 @@ def main(field,spws,
       field :: string
         The field name
       spws :: string
-        Comma-separated string of spws to plot
+        Comma-separated string of spws to plot.
+      stokes :: string
+        The Stokes parameters in the image.
       taper :: boolean
         if True, use uvtaper images
       imsmooth :: boolean
@@ -106,13 +111,14 @@ def main(field,spws,
         #
         # Read image
         #
-        image = '{0}.{1}.mfs.clean'.format(field,spw)
+        image = '{0}.{1}.{2}.mfs.clean'.format(field, spw, stokes)
         if taper: image += '.uvtaper'
         if imsmooth: image += '.imsmooth'
         image += '.image.fits'
         if not os.path.exists(image):
             continue
-        image_hdu = fits.open(image)[0]
+        hdulist = fits.open(image)
+        image_hdu = hdulist[0]
         #
         # Read image header
         #
@@ -121,7 +127,7 @@ def main(field,spws,
         #
         # Read pbcor image
         #
-        pbcorr = '{0}.{1}.mfs.clean'.format(field,spw)
+        pbcorr = '{0}.{1}.{2}.mfs.clean'.format(field, spw, stokes)
         if taper: pbcorr += '.uvtaper'
         pbcorr += '.pbcor'
         if imsmooth: pbcorr += '.imsmooth'
@@ -130,7 +136,7 @@ def main(field,spws,
         #
         # Read residual image
         #
-        residual = '{0}.{1}.mfs.clean'.format(field,spw)
+        residual = '{0}.{1}.{2}.mfs.clean'.format(field, spw, stokes)
         if taper: residual += '.uvtaper'
         if imsmooth: residual += '.imsmooth'
         residual += '.residual.fits'
@@ -175,6 +181,16 @@ def main(field,spws,
             beam_maj = image_hdu.header['BMAJ']/pixsize # pix
             beam_min = image_hdu.header['BMIN']/pixsize # pix
             beam_pa = image_hdu.header['BPA']
+            ellipse = Ellipse((1./8.*xlen,1./8.*ylen),
+                            beam_min,beam_maj,angle=beam_pa,
+                            fill=True,zorder=10,hatch='///',
+                            edgecolor='black',facecolor='white')
+            ax.add_patch(ellipse)
+        elif len(hdulist) > 1:
+            hdu = hdulist[1]
+            beam_maj = hdu.data['BMAJ'][0]/pixsize
+            beam_min = hdu.data['BMIN'][0]/pixsize
+            beam_pa = hdu.data['BPA'][0]
             ellipse = Ellipse((1./8.*xlen,1./8.*ylen),
                             beam_min,beam_maj,angle=beam_pa,
                             fill=True,zorder=10,hatch='///',
