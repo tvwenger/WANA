@@ -128,7 +128,7 @@ def main(field,spws,stokes='I',taper=False,imsmooth=False,
         #
         # Clip image at sigmaclip*rms
         #
-        rms = 1.4826*np.nanmean(np.abs(residual_data-np.nanmean(residual_data)))
+        rms = 1.4826*np.nanmedian(np.abs(residual_data-np.nanmean(residual_data)))
         clip = image_data < sigmaclip*rms
         image_data[clip] = 0.
         #

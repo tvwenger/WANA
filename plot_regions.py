@@ -144,7 +144,7 @@ def main(field,spws,stokes='I',
         #
         # Compute RMS from residuals (MAD)
         #
-        sigma = 1.4826*np.nanmean(np.abs(residual_hdu.data[0,0]-np.nanmean(residual_hdu.data[0,0])))
+        sigma = 1.4826*np.nanmedian(np.abs(residual_hdu.data[0,0]-np.nanmean(residual_hdu.data[0,0])))
         #
         # Generate figure
         #
@@ -188,8 +188,12 @@ def main(field,spws,stokes='I',
             ax.add_patch(ellipse)
         elif len(hdulist) > 1:
             hdu = hdulist[1]
-            beam_maj = hdu.data['BMAJ'][0]/pixsize
-            beam_min = hdu.data['BMIN'][0]/pixsize
+            convert = 1.
+            # convert arcsec to deg if necessary
+            if 'arcsec' in hdu.header['TUNIT1']:
+                convert = 1./3600.
+            beam_maj = convert*hdu.data['BMAJ'][0]/pixsize
+            beam_min = convert*hdu.data['BMIN'][0]/pixsize
             beam_pa = hdu.data['BPA'][0]
             ellipse = Ellipse((1./8.*xlen,1./8.*ylen),
                             beam_min,beam_maj,angle=beam_pa,

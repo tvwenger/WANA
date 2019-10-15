@@ -82,21 +82,21 @@ def main(field,regions,spws,label,
     # Set-up file
     #
     with open(outfile,'w') as f:
-        # 0    1           2          3        4        5          6           7           8          9
-        # spw  frequency   cont       e_cont_A e_cont_B area_arcsec area_pixel beam_arcsec beam_pixel ps_check
-        # #    MHz         mJy/beam   mJy/beam mJy/beam arcsec2     pixels     arcsec2     pixels     
-        # cont 9494.152594 12345.6789 123.4567 123.4567 12345.67    123456.78  12345.67    123456.78  100.00
-        # 1    9494.152594 12345.6789 123.4567 123.4567 12345.67    123456.78  12345.67    123456.78  100.00
-        # 1234 12345678902 1234567890 12345678 12345678 12345678901 1234567890 12345678901 1234567890 12345678
+        # 0    1           2          3        4        5          6           7           8          9        10
+        # spw  frequency   cont       e_cont_A e_cont_B area_arcsec area_pixel beam_arcsec beam_pixel ps_check pb_level
+        # #    MHz         mJy/beam   mJy/beam mJy/beam arcsec2     pixels     arcsec2     pixels              %
+        # cont 9494.152594 12345.6789 123.4567 123.4567 12345.67    123456.78  12345.67    123456.78  100.00   100.00
+        # 1    9494.152594 12345.6789 123.4567 123.4567 12345.67    123456.78  12345.67    123456.78  100.00   100.00
+        # 1234 12345678902 1234567890 12345678 12345678 12345678901 1234567890 12345678901 1234567890 12345678 12345678
         #
-        headerfmt = '{0:4} {1:12} {2:10} {3:8} {4:8} {5:11} {6:10} {7:11} {8:10} {9:8}\n'
-        rowfmt = '{0:4} {1:12.6f} {2:10.4f} {3:8.4f} {4:8.4f} {5:11.2f} {6:10.2f} {7:11.2f} {8:10.2f} {9:8.2f}\n'
-        f.write(headerfmt.format('spw','frequency','cont','e_cont_A','e_cont_B','area_arcsec','area_pixel','beam_arcsec','beam_pixel','ps_check'))
+        headerfmt = '{0:4} {1:12} {2:10} {3:8} {4:8} {5:11} {6:10} {7:11} {8:10} {9:8} {10:8}\n'
+        rowfmt = '{0:4} {1:12.6f} {2:10.4f} {3:8.4f} {4:8.4f} {5:11.2f} {6:10.2f} {7:11.2f} {8:10.2f} {9:8.2f} {10:8.2f}\n'
+        f.write(headerfmt.format('spw','frequency','cont','e_cont_A','e_cont_B','area_arcsec','area_pixel','beam_arcsec','beam_pixel','ps_check','pb_level'))
         if fluxtype == 'total':
             fluxunit = 'mJy'
         else:
             fluxunit = 'mJy/beam'
-        f.write(headerfmt.format('#','MHz',fluxunit,fluxunit,fluxunit,'arcsec2','pixels','arcsec2','pixels','%'))
+        f.write(headerfmt.format('#','MHz',fluxunit,fluxunit,fluxunit,'arcsec2','pixels','arcsec2','pixels','%','%'))
         #
         # Read data for each spw
         #
@@ -112,7 +112,8 @@ def main(field,regions,spws,label,
             if not os.path.exists(image):
                 print("{0} not found.".format(image))
                 continue
-            image_hdu = fits.open(image)[0]
+            hdulist = fits.open(image)
+            image_hdu = hdulist[0]
             image_wcs = WCS(image_hdu.header)
             wcs_celest = image_wcs.sub(['celestial'])
             frequency = image_hdu.header['CRVAL3']/1.e6 # MHz
@@ -120,7 +121,22 @@ def main(field,regions,spws,label,
             # Calculate beam area and pixel size
             #
             pixel_size = 3600.**2. * np.abs(image_hdu.header['CDELT1'] * image_hdu.header['CDELT2']) # arcsec^2
-            beam_arcsec = 3600.**2. * np.pi*image_hdu.header['BMIN']*image_hdu.header['BMAJ']/(4.*np.log(2.)) # arcsec^2
+            if 'BMAJ' in image_hdu.header.keys():
+                beam_maj = image_hdu.header['BMAJ'] # deg
+                beam_min = image_hdu.header['BMIN'] # deg
+                beam_pa = image_hdu.header['BPA'] # deg
+            elif len(hdulist) > 1:
+                hdu = hdulist[1]
+                convert = 1.
+                # convert arcsec to deg if necessary
+                if 'arcsec' in hdu.header['TUNIT1']:
+                    convert = 1./3600.
+                beam_maj = convert*hdu.data['BMAJ'][0] # deg
+                beam_min = convert*hdu.data['BMIN'][0] # deg
+                beam_pa = hdu.data['BPA'][0]
+            else:
+                raise ValueError("Could not get beam size!")
+            beam_arcsec = 3600.**2. * np.pi*beam_min*beam_maj/(4.*np.log(2.)) # arcsec^2
             beam_pixel = beam_arcsec / pixel_size
             #
             # Construct synthesized beam kernel 2D Gaussian centered on origin
@@ -132,9 +148,9 @@ def main(field,regions,spws,label,
             y_grid, x_grid = np.meshgrid(y_axis, x_axis, indexing='ij')
             lon_grid = -image_hdu.header['CDELT1']*x_grid
             lat_grid = image_hdu.header['CDELT2']*y_grid
-            bmin = image_hdu.header['BMIN']/(2.*np.sqrt(2.*np.log(2.)))
-            bmaj = image_hdu.header['BMAJ']/(2.*np.sqrt(2.*np.log(2.)))
-            bpa = -np.deg2rad(image_hdu.header['BPA'])+np.pi/2.
+            bmin = beam_min/(2.*np.sqrt(2.*np.log(2.)))
+            bmaj = beam_maj/(2.*np.sqrt(2.*np.log(2.)))
+            bpa = -np.deg2rad(beam_pa)+np.pi/2.
             # 2-D Gaussian parameters
             A = np.cos(bpa)**2./(2.*bmaj**2.) + np.sin(bpa)**2./(2.*bmin**2.)
             B = -np.sin(2.*bpa)/(4.*bmaj**2.) + np.sin(2.*bpa)/(4.*bmin**2.)
@@ -148,7 +164,7 @@ def main(field,regions,spws,label,
             if imsmooth: residualimage += '.imsmooth'
             residualimage += '.residual.fits'
             residual_hdu = fits.open(residualimage)[0]
-            image_rms = 1.4825*np.nanmean(np.abs(residual_hdu.data[0,0]-np.nanmean(residual_hdu.data[0,0])))
+            image_rms = 1.4825*np.nanmedian(np.abs(residual_hdu.data[0,0]-np.nanmean(residual_hdu.data[0,0])))
             #
             # PB image, and PB-corrected rms
             #
@@ -166,6 +182,7 @@ def main(field,regions,spws,label,
                 area_pixel = np.nan
                 area_arcsec = np.nan
                 ps_check = np.nan
+                pb_level = np.nan
             elif fluxtype == 'peak':
                 with open(region,'r') as freg:
                     freg.readline()
@@ -192,6 +209,10 @@ def main(field,regions,spws,label,
                 e_cont_A = 1000.*image_rms[int(pix[1]),int(pix[0])]
                 e_cont_B = np.nan
                 ps_check = np.nan
+                #
+                # Get primary beam level at position
+                #
+                pb_level = 100.*pb_hdu.data[0,0,int(pix[1]),int(pix[0])]
             #
             # Read region file, sum spectrum region
             #
@@ -239,7 +260,7 @@ def main(field,regions,spws,label,
                 #
                 # Mask large uvwaves
                 #
-                uvwave_max = 4.*np.log(2.)/(np.pi*np.deg2rad(image_hdu.header['BMAJ']))
+                uvwave_max = 4.*np.log(2.)/(np.pi*np.deg2rad(beam_maj))
                 vis[uvwave > uvwave_max] = np.nan
                 uvwave[uvwave > uvwave_max] = np.nan
                 #
@@ -252,6 +273,10 @@ def main(field,regions,spws,label,
                 is_max = (uvwave < uvwave_max)*(uvwave > uvwave_max-1000)
                 vis_max = np.nanmean(vis[is_max])
                 ps_check = 100.*(vis_max-vis_zero)/vis_zero
+                #
+                # Get average primary beam level over region
+                #
+                pb_level = 100.*np.nanmean(pb_hdu.data[0,0,region_mask])
                 #
                 # Plot visibilities
                 #
@@ -278,4 +303,4 @@ def main(field,regions,spws,label,
             #
             # Write row to file
             #
-            f.write(rowfmt.format(spw.replace('spw',''),frequency,cont,e_cont_A,e_cont_B,area_arcsec,area_pixel,beam_arcsec,beam_pixel,ps_check))
+            f.write(rowfmt.format(spw.replace('spw',''),frequency,cont,e_cont_A,e_cont_B,area_arcsec,area_pixel,beam_arcsec,beam_pixel,ps_check,pb_level))
