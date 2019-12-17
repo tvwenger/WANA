@@ -245,7 +245,7 @@ class ClickPlot:
             pfit = np.polyfit(xdata[~outliers],smoy[~outliers],3)
             yfit = np.poly1d(pfit)
             new_smoy = smoy - yfit(xdata)
-            rms = 1.4826*np.median(np.abs(new_smoy[~outliers]-np.mean(new_smoy[~outliers])))
+            rms = 1.4826*np.median(np.abs(new_smoy[~outliers]-np.median(new_smoy[~outliers])))
             new_outliers = (np.abs(new_smoy) > 3.*rms) | np.isnan(ydata)
             if np.sum(new_outliers) <= np.sum(outliers):
                 break
@@ -349,8 +349,10 @@ class ClickPlot:
         self.ax.set_title(title.replace('_','\_'))
         self.ax.set_xlabel(xlabel)
         self.ax.set_ylabel(ylabel)
-        xmin = -250
-        xmax = 150
+        #xmin = -250
+        #xmax = 150
+        xmin = np.min(xdata)
+        xmax = np.max(xdata)
         self.ax.set_xlim(xmin,xmax)
         ydata_cut = ydata[np.argmin(np.abs(xdata-xmin)):np.argmin(np.abs(xdata-xmax))]
         yrange = np.max(ydata_cut)-np.min(ydata_cut)
@@ -439,8 +441,10 @@ class ClickPlot:
         self.ax.set_title(title.replace('_','\_'))
         self.ax.set_xlabel(xlabel)
         self.ax.set_ylabel(ylabel)
-        xmin = -250
-        xmax = 150
+        #xmin = -250
+        #xmax = 150
+        xmin = np.min(xdata)
+        xmax = np.max(xdata)
         self.ax.set_xlim(xmin,xmax)
         ydata_cut = ydata[np.argmin(np.abs(xdata-xmin)):np.argmin(np.abs(xdata-xmax))]
         yrange = np.max(ydata_cut)-np.min(ydata_cut)
@@ -460,7 +464,7 @@ class ClickPlot:
         outliers = np.array([False]*len(ydata))
         while True:
             exclude = missing+outliers
-            rms = 1.4826*np.median(np.abs(smoy[~exclude]-np.mean(smoy[~exclude])))
+            rms = 1.4826*np.median(np.abs(smoy[~exclude]-np.median(smoy[~exclude])))
             new_outliers = (np.abs(smoy) > 5.*rms)
             if np.sum(new_outliers) <= np.sum(outliers):
                 break
@@ -579,8 +583,10 @@ class ClickPlot:
         self.ax.set_title(title.replace('_','\_'))
         self.ax.set_xlabel(xlabel)
         self.ax.set_ylabel(ylabel)
-        xmin = -250
-        xmax = 150
+        #xmin = -250
+        #xmax = 150
+        xmin = np.min(xdata)
+        xmax = np.max(xdata)
         self.ax.set_xlim(xmin,xmax)
         ydata_cut = ydata[np.argmin(np.abs(xdata-xmin)):np.argmin(np.abs(xdata-xmax))]
         yrange = np.max(ydata_cut)-np.min(ydata_cut)
@@ -1011,7 +1017,7 @@ def calc_linefreestats(ydata):
         pfit = np.polyfit(xdata[~outliers],smoy[~outliers],3)
         yfit = np.poly1d(pfit)
         new_smoy = smoy - yfit(xdata)
-        rms = 1.4826*np.median(np.abs(new_smoy[~outliers]-np.mean(new_smoy[~outliers])))
+        rms = 1.4826*np.median(np.abs(new_smoy[~outliers]-np.median(new_smoy[~outliers])))
         new_outliers = (np.abs(new_smoy) > 3.*rms) | np.isnan(ydata)
         if np.sum(new_outliers) <= np.sum(outliers):
             break

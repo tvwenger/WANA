@@ -59,7 +59,7 @@ def line_free(xdata, ydata):
         pfit = np.polyfit(xdata[~outliers], ydata[~outliers], 3)
         yfit = np.poly1d(pfit)
         new_ydata = ydata - yfit(xdata)
-        rms = 1.4826*np.median(np.abs(new_ydata[~outliers]-np.mean(new_ydata[~outliers])))
+        rms = 1.4826*np.median(np.abs(new_ydata[~outliers]-np.median(new_ydata[~outliers])))
         new_outliers = (np.abs(new_ydata) > 3.*rms) | np.isnan(ydata)
         if np.sum(new_outliers) <= np.sum(outliers):
             break
@@ -95,7 +95,7 @@ def gauss_guess(xdata, ydata):
     outliers = np.array([False]*len(ydata))
     while True:
         exclude = missing+outliers
-        rms = 1.4826*np.median(np.abs(ydata[~exclude]-np.mean(ydata[~exclude])))
+        rms = 1.4826*np.median(np.abs(ydata[~exclude]-np.median(ydata[~exclude])))
         new_outliers = (np.abs(ydata) > 3.*rms)
         if np.sum(new_outliers) <= np.sum(outliers):
             break
@@ -271,7 +271,7 @@ def process(field, spw, uvtaper=False, imsmooth=False):
         #
         contmedian[x, y] = np.median(flux)
         contchans[x, y] = len(chan)
-        specrms[x, y] = 1.4826*(np.median(np.abs(flux-np.mean(flux))))
+        specrms[x, y] = 1.4826*(np.median(np.abs(flux-np.median(flux))))
         #
         # Estimate line parameters
         #

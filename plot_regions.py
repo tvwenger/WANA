@@ -144,7 +144,7 @@ def main(field,spws,stokes='I',
         #
         # Compute RMS from residuals (MAD)
         #
-        sigma = 1.4826*np.nanmedian(np.abs(residual_hdu.data[0,0]-np.nanmean(residual_hdu.data[0,0])))
+        sigma = 1.4826*np.nanmedian(np.abs(residual_hdu.data[0,0]-np.nanmedian(residual_hdu.data[0,0])))
         #
         # Generate figure
         #
@@ -166,8 +166,8 @@ def main(field,spws,stokes='I',
         #
         # Adjust limits
         #
-        ax.set_xlim(0.1*xlen,0.9*xlen)
-        ax.set_ylim(0.1*ylen,0.9*ylen)
+        #ax.set_xlim(0.1*xlen,0.9*xlen)
+        #ax.set_ylim(0.1*ylen,0.9*ylen)
         #
         # Plot colorbar
         #
@@ -181,7 +181,7 @@ def main(field,spws,stokes='I',
             beam_maj = image_hdu.header['BMAJ']/pixsize # pix
             beam_min = image_hdu.header['BMIN']/pixsize # pix
             beam_pa = image_hdu.header['BPA']
-            ellipse = Ellipse((1./8.*xlen,1./8.*ylen),
+            ellipse = Ellipse((1./6.*xlen,1./6.*ylen),
                             beam_min,beam_maj,angle=beam_pa,
                             fill=True,zorder=10,hatch='///',
                             edgecolor='black',facecolor='white')
@@ -241,7 +241,7 @@ def main(field,spws,stokes='I',
         # Add regions legend
         #
         if len(peak_regions) > 0:
-            region_legend = plt.legend(loc='upper right',fontsize=10)
+            region_legend = plt.legend(loc='upper right',fontsize=6)
             ax.add_artist(region_legend)
         #
         # Plot WISE Catalog regions
@@ -265,12 +265,12 @@ def main(field,spws,stokes='I',
                 ell = Ellipse((xpos,ypos),size,size,
                                color='y',fill=False,linestyle='dashed',zorder=100)
                 ax.add_patch(ell)
-                ax.text(dat['RA'],dat['Dec'],dat['GName'],transform=ax.get_transform('world'),fontsize=6,zorder=100)
+                ax.text(dat['RA'],dat['Dec'],dat['GName'],transform=ax.get_transform('world'),fontsize=2,zorder=100)
             # add legend element
             ell = Ellipse((0,0),0.1,0.1,color='y',fill=False,
                           linestyle='dashed',label='WISE Catalog')
             patches = [ell]
-            wise_legend = plt.legend(handles=patches,loc='lower right',fontsize=10,
+            wise_legend = plt.legend(handles=patches,loc='lower right',fontsize=6,
                                      handler_map={Ellipse: HandlerEllipse()})
             ax.add_artist(wise_legend)
         #

@@ -164,7 +164,7 @@ def main(field,regions,spws,label,
             if imsmooth: residualimage += '.imsmooth'
             residualimage += '.residual.fits'
             residual_hdu = fits.open(residualimage)[0]
-            image_rms = 1.4825*np.nanmedian(np.abs(residual_hdu.data[0,0]-np.nanmean(residual_hdu.data[0,0])))
+            image_rms = 1.4825*np.nanmedian(np.abs(residual_hdu.data[0,0]-np.nanmedian(residual_hdu.data[0,0])))
             #
             # PB image, and PB-corrected rms
             #

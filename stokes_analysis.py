@@ -119,8 +119,8 @@ def main(field,regions,spws,label,
             # Read residual image
             #
             image = '{0}.{1}.{2}.mfs.clean'.format(field, spw, stokes)
-            if taper: residualimage += '.uvtaper'
-            if imsmooth: residualimage += '.imsmooth'
+            if taper: image += '.uvtaper'
+            if imsmooth: image += '.imsmooth'
             image += '.residual.fits'
             residual_hdu = fits.open(image)[0]
             #
@@ -171,7 +171,7 @@ def main(field,regions,spws,label,
             #
             # Get residual image RMS for each stokes
             #
-            image_rms = 1.4825*np.nanmedian(np.abs(residual_hdu.data[:,0].T-np.nanmean(residual_hdu.data[:,0], axis=(1,2))).T, axis=(1,2))
+            image_rms = 1.4825*np.nanmedian(np.abs(residual_hdu.data[:,0].T-np.nanmedian(residual_hdu.data[:,0], axis=(1,2))).T, axis=(1,2))
             #
             # Get PB-correctd RMS for each stokes
             #
@@ -227,13 +227,13 @@ def main(field,regions,spws,label,
                     #
                     map_mean[stokesi] =1000.*np.nanmean(image_hdu.data[stokesi,0])
                     map_med[stokesi] = 1000.*np.nanmedian(image_hdu.data[stokesi,0])
-                    map_rms[stokesi] = 1000.*1.4825*np.nanmedian(np.abs(image_hdu.data[stokesi,0]-np.nanmean(image_hdu.data[stokesi,0])))
+                    map_rms[stokesi] = 1000.*1.4825*np.nanmedian(np.abs(image_hdu.data[stokesi,0]-np.nanmedian(image_hdu.data[stokesi,0])))
                     #
                     # Compute mean, median, and rms within region
                     #
                     reg_mean[stokesi] =1000.*np.nanmean(image_hdu.data[stokesi,0,region_mask])
                     reg_med[stokesi] = 1000.*np.nanmedian(image_hdu.data[stokesi,0,region_mask])
-                    reg_rms[stokesi] = 1000.*1.4825*np.nanmedian(np.abs(image_hdu.data[stokesi,0,region_mask]-np.nanmean(image_hdu.data[stokesi,0,region_mask])))
+                    reg_rms[stokesi] = 1000.*1.4825*np.nanmedian(np.abs(image_hdu.data[stokesi,0,region_mask]-np.nanmedian(image_hdu.data[stokesi,0,region_mask])))
                     #
                     # Get average primary beam level over region
                     #
