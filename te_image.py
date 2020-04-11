@@ -24,9 +24,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 Changelog:
 Trey V. Wenger November 2018 - V1.0
+
+Trey V. Wenger September 2019 -V2.0
+    Update for WISP V2.0 with stokes parameter support
+    Add smoothing and re-gridding
 """
 
 import os
+
 import glob
 import itertools
 import numpy as np
@@ -35,7 +40,7 @@ from astropy.io import fits
 from astropy.wcs import WCS
 import matplotlib.pyplot as plt
 
-__version__ = "1.0"
+__version__ = "2.0"
 
 def line_free(xdata, ydata):
     """
@@ -56,6 +61,8 @@ def line_free(xdata, ydata):
     """
     outliers = np.isnan(ydata)
     while True:
+        if np.sum(outliers) == len(xdata):
+            return np.array([]), np.array([])
         pfit = np.polyfit(xdata[~outliers], ydata[~outliers], 3)
         yfit = np.poly1d(pfit)
         new_ydata = ydata - yfit(xdata)
@@ -153,7 +160,48 @@ def gaussian(xdata,*args):
         ydata += a*np.exp(-(xdata-c)**2./(2.*s**2.))
     return ydata
 
-def process(field, spw, uvtaper=False, imsmooth=False):
+def smooth_regrid(hdu, velocity):
+    """
+    Smooth and re-grid a 3-D data cube to a common velocity grid.
+    Use sinc function for smoothing and re-gridding.
+
+    Inputs:
+      hdu :: astropy.fits.HDU
+        HDU container of data
+      velocity :: 1-D array of scalars
+        The new velocity axis at which to interpolate velocities
+
+    Returns:
+      newhdu :: astropy.fits.HDU
+        The new HDU container with the smoothed/re-gridded data
+    """
+    smogrid_res = velocity[1]-velocity[0]
+    original_velocity = ((np.arange(hdu.header['NAXIS3']) - (hdu.header['CRPIX3']-1))*hdu.header['CDELT3'] +
+                         hdu.header['CRVAL3'])/1000. # km/s
+    original_res = hdu.header['CDELT3']/1000. # km/s
+    if smogrid_res < original_res:
+        raise ValueError("Cannot smooth to a finer resolution!")
+    # construct sinc weights, and catch out of bounds
+    sinc_wts = np.array([np.sinc((v-original_velocity)/smogrid_res)
+                         if (original_velocity[0] < v < original_velocity[-1])
+                         else np.zeros(len(original_velocity))*np.nan
+                         for v in velocity])
+    # normalize
+    sinc_wts = (sinc_wts.T/np.sum(sinc_wts, axis=1)).T
+    # convolve
+    newdata = np.tensordot(sinc_wts, hdu.data[0], axes=([1], [0]))[np.newaxis]
+    # update hdu
+    newhdu = hdu.copy()
+    newhdu.data = newdata
+    newhdu.header['NAXIS3'] = len(velocity)
+    newhdu.header['CUNIT3'] = 'm/s'
+    newhdu.header['CRVAL3'] = velocity[0]*1000.
+    newhdu.header['CDELT3'] = smogrid_res*1000.
+    newhdu.header['CRPIX3'] = 1
+    return newhdu
+
+def process(field, spw, uvtaper=False, imsmooth=False,
+            smogrid_velocity=None):
     """
     Compute the moment 0 maps and generate electron temperature maps.
     Fit lines in each pixel and generate electron temperature maps.
@@ -167,6 +215,9 @@ def process(field, spw, uvtaper=False, imsmooth=False):
         If True, use the uv-tapered image
       imsmooth :: boolean
         If True, use the imsmoothed image
+      smogrid_velocity :: 1-D array of scalars
+        If not None, the channel cubes are re-gridded to this velocity
+        axis.
 
       Returns: goodplots
         goodplots :: list of strings
@@ -179,21 +230,32 @@ def process(field, spw, uvtaper=False, imsmooth=False):
     if uvtaper: linetype += '.uvtaper'
     linetype += '.pbcor'
     if imsmooth: linetype += '.imsmooth'
+    chanlinetype = linetype
     #
     # Read MFS image and channel image
     #
-    mfsimage = '{0}.{1}.mfs.{2}.image.fits'.format(field,spw,linetype)
+    mfsimage = '{0}.{1}.I.mfs.{2}.image.fits'.format(field,spw,linetype)
     mfshdu = fits.open(mfsimage)
-    chanimage = '{0}.{1}.channel.{2}.image.fits'.format(field,spw,linetype)
+    chanimage = '{0}.{1}.I.channel.{2}.image.fits'.format(field,spw,linetype)
     chanhdu = fits.open(chanimage)
+    #
+    # Smooth/regrid velocity axis of channel image
+    #
+    if smogrid_velocity is not None:
+        chanhdu[0] = smooth_regrid(chanhdu[0], smogrid_velocity)
+        # save smoothed image
+        chanlinetype += '.smogrid'
+        chanimage = '{0}.{1}.I.channel.{2}.image.fits'.format(field,spw,chanlinetype)
+        chanhdu.writeto(chanimage, overwrite=True, output_verify='fix+warn')
     #
     # Clip MFS and channel images using fullrgn masks
     #
     rgnspw = spw
     if spw == 'all':
-        rgnspw = 'cont'
+        rgnspw = 'all'
     fullrgn = '*.notaper.{0}.fullrgn.fits'.format(rgnspw)
     if uvtaper: fullrgn = '*.uvtaper.{0}.fullrgn.fits'.format(rgnspw)
+    if imsmooth: fullrgn = '*.imsmooth.{0}.fullrgn.fits'.format(rgnspw)
     if uvtaper and imsmooth: fullrgn = '*.uvtaper.imsmooth.{0}.fullrgn.fits'.format(rgnspw)
     masks = glob.glob(fullrgn)
     cliprgn = np.zeros(mfshdu[0].data.shape, dtype=np.bool)
@@ -213,12 +275,12 @@ def process(field, spw, uvtaper=False, imsmooth=False):
     #
     # Save clipped images
     #
-    mfsclipimage = '{0}.{1}.mfs.{2}.image.clip.fits'.format(field,spw,linetype)
+    mfsclipimage = '{0}.{1}.I.mfs.{2}.image.clip.fits'.format(field,spw,linetype)
     mfshdu[0].data = clipmfs
-    mfshdu.writeto(mfsclipimage,overwrite=True)
-    chanclipimage = '{0}.{1}.channel.{2}.image.clip.fits'.format(field,spw,linetype)
+    mfshdu.writeto(mfsclipimage,overwrite=True, output_verify='fix+warn')
+    chanclipimage = '{0}.{1}.I.channel.{2}.image.clip.fits'.format(field,spw,chanlinetype)
     chanhdu[0].data = clipchan
-    chanhdu.writeto(chanclipimage,overwrite=True)
+    chanhdu.writeto(chanclipimage,overwrite=True, output_verify='fix+warn')
     #
     # Analyze image on pixel by pixel basis
     #
@@ -328,60 +390,60 @@ def process(field, spw, uvtaper=False, imsmooth=False):
     # Save images
     #
     # continuum subtracted cube
-    contsubimage = '{0}.{1}.channel.{2}.image.contsub.fits'.format(field,spw,linetype)
+    contsubimage = '{0}.{1}.I.channel.{2}.image.contsub.fits'.format(field,spw,chanlinetype)
     chanhdu[0].data = contsub
-    chanhdu.writeto(contsubimage,overwrite=True)
+    chanhdu.writeto(contsubimage,overwrite=True, output_verify='fix+warn')
     # sum of line flux
-    linesumimage = '{0}.{1}.channel.{2}.image.linesum.fits'.format(field,spw,linetype)
+    linesumimage = '{0}.{1}.I.channel.{2}.image.linesum.fits'.format(field,spw,chanlinetype)
     mfshdu[0].data = linesum
     mfshdu[0].header['BUNIT'] = 'Jy/beam*km/s'
-    mfshdu.writeto(linesumimage, overwrite=True)
+    mfshdu.writeto(linesumimage, overwrite=True, output_verify='fix+warn')
     goodplots.append(('linesum',spw,linesumimage))
     # number of line channels used
-    linechansimage = '{0}.{1}.channel.{2}.image.linechans.fits'.format(field,spw,linetype)
+    linechansimage = '{0}.{1}.I.channel.{2}.image.linechans.fits'.format(field,spw,chanlinetype)
     mfshdu[0].data = linechans
     mfshdu[0].header['BUNIT'] = 'Number'
-    mfshdu.writeto(linechansimage, overwrite=True)
+    mfshdu.writeto(linechansimage, overwrite=True, output_verify='fix+warn')
     # spectral rms
-    specrmsimage = '{0}.{1}.channel.{2}.image.specrms.fits'.format(field,spw,linetype)
+    specrmsimage = '{0}.{1}.I.channel.{2}.image.specrms.fits'.format(field,spw,chanlinetype)
     mfshdu[0].data = specrms
-    mfshdu.writeto(specrmsimage,overwrite=True)
+    mfshdu.writeto(specrmsimage,overwrite=True, output_verify='fix+warn')
     goodplots.append(('specrms',spw,specrmsimage))
     # median continuum flux
-    contmedianimage = '{0}.{1}.channel.{2}.image.contmedian.fits'.format(field,spw,linetype)
+    contmedianimage = '{0}.{1}.I.channel.{2}.image.contmedian.fits'.format(field,spw,chanlinetype)
     mfshdu[0].data = contmedian
-    mfshdu.writeto(contmedianimage,overwrite=True)
+    mfshdu.writeto(contmedianimage,overwrite=True, output_verify='fix+warn')
     # number of continuum channels used
-    contchansimage = '{0}.{1}.channel.{2}.image.contchans.fits'.format(field,spw,linetype)
+    contchansimage = '{0}.{1}.I.channel.{2}.image.contchans.fits'.format(field,spw,chanlinetype)
     mfshdu[0].data = contchans
     mfshdu[0].header['BUNIT'] = 'Number'
-    mfshdu.writeto(contchansimage, overwrite=True)
+    mfshdu.writeto(contchansimage, overwrite=True, output_verify='fix+warn')
     # fitted line peak flux
-    linefluximage = '{0}.{1}.channel.{2}.image.lineflux.fits'.format(field,spw,linetype)
+    linefluximage = '{0}.{1}.I.channel.{2}.image.lineflux.fits'.format(field,spw,chanlinetype)
     mfshdu[0].data = lineflux
     mfshdu[0].header['BUNIT'] = 'Jy/beam'
-    mfshdu.writeto(linefluximage, overwrite=True)
-    e_linefluximage = '{0}.{1}.channel.{2}.image.e_lineflux.fits'.format(field,spw,linetype)
+    mfshdu.writeto(linefluximage, overwrite=True, output_verify='fix+warn')
+    e_linefluximage = '{0}.{1}.I.channel.{2}.image.e_lineflux.fits'.format(field,spw,chanlinetype)
     mfshdu[0].data = e_lineflux
-    mfshdu.writeto(e_linefluximage, overwrite=True)
+    mfshdu.writeto(e_linefluximage, overwrite=True, output_verify='fix+warn')
     goodplots.append(('lineflux',spw,linefluximage,e_linefluximage))
     # fitted line fwhm
-    linefwhmimage = '{0}.{1}.channel.{2}.image.linefwhm.fits'.format(field,spw,linetype)
+    linefwhmimage = '{0}.{1}.I.channel.{2}.image.linefwhm.fits'.format(field,spw,chanlinetype)
     mfshdu[0].data = linefwhm
     mfshdu[0].header['BUNIT'] = 'km/s'
-    mfshdu.writeto(linefwhmimage, overwrite=True)
-    e_linefwhmimage = '{0}.{1}.channel.{2}.image.e_linefwhm.fits'.format(field,spw,linetype)
+    mfshdu.writeto(linefwhmimage, overwrite=True, output_verify='fix+warn')
+    e_linefwhmimage = '{0}.{1}.I.channel.{2}.image.e_linefwhm.fits'.format(field,spw,chanlinetype)
     mfshdu[0].data = e_linefwhm
-    mfshdu.writeto(e_linefwhmimage, overwrite=True)
+    mfshdu.writeto(e_linefwhmimage, overwrite=True, output_verify='fix+warn')
     goodplots.append(('linefwhm',spw,linefwhmimage,e_linefwhmimage))
     # fittend line velocity
-    linevlsrimage = '{0}.{1}.channel.{2}.image.linevlsr.fits'.format(field,spw,linetype)
+    linevlsrimage = '{0}.{1}.I.channel.{2}.image.linevlsr.fits'.format(field,spw,chanlinetype)
     mfshdu[0].data = linevlsr
     mfshdu[0].header['BUNIT'] = 'km/s'
-    mfshdu.writeto(linevlsrimage, overwrite=True)
-    e_linevlsrimage = '{0}.{1}.channel.{2}.image.e_linevlsr.fits'.format(field,spw,linetype)
+    mfshdu.writeto(linevlsrimage, overwrite=True, output_verify='fix+warn')
+    e_linevlsrimage = '{0}.{1}.I.channel.{2}.image.e_linevlsr.fits'.format(field,spw,chanlinetype)
     mfshdu[0].data = e_linevlsr
-    mfshdu.writeto(e_linevlsrimage, overwrite=True)
+    mfshdu.writeto(e_linevlsrimage, overwrite=True, output_verify='fix+warn')
     goodplots.append(('linevlsr',spw,linevlsrimage,e_linevlsrimage))
     #
     # Compute electron temperature image using summed line
@@ -392,13 +454,13 @@ def process(field, spw, uvtaper=False, imsmooth=False):
     #
     # Save sum Te image
     #
-    tesumimage = '{0}.{1}.channel.{2}.image.tesum.fits'.format(field,spw,linetype)
+    tesumimage = '{0}.{1}.I.channel.{2}.image.tesum.fits'.format(field,spw,chanlinetype)
     mfshdu[0].data = tesum
     mfshdu[0].header['BUNIT'] = 'K'
-    mfshdu.writeto(tesumimage, overwrite=True)
-    e_tesumimage = '{0}.{1}.channel.{2}.image.e_tesum.fits'.format(field,spw,linetype)
+    mfshdu.writeto(tesumimage, overwrite=True, output_verify='fix+warn')
+    e_tesumimage = '{0}.{1}.I.channel.{2}.image.e_tesum.fits'.format(field,spw,chanlinetype)
     mfshdu[0].data = e_tesum
-    mfshdu.writeto(e_tesumimage, overwrite=True)
+    mfshdu.writeto(e_tesumimage, overwrite=True, output_verify='fix+warn')
     goodplots.append(('tesum',spw,tesumimage,e_tesumimage))
     #
     # Compute electron temperature using line fits
@@ -408,17 +470,18 @@ def process(field, spw, uvtaper=False, imsmooth=False):
     #
     # Save fit Te image
     #
-    tefitimage = '{0}.{1}.channel.{2}.image.tefit.fits'.format(field,spw,linetype)
+    tefitimage = '{0}.{1}.I.channel.{2}.image.tefit.fits'.format(field,spw,chanlinetype)
     mfshdu[0].data = tefit
     mfshdu[0].header['BUNIT'] = 'K'
-    mfshdu.writeto(tefitimage, overwrite=True)
-    e_tefitimage = '{0}.{1}.channel.{2}.image.e_tefit.fits'.format(field,spw,linetype)
+    mfshdu.writeto(tefitimage, overwrite=True, output_verify='fix+warn')
+    e_tefitimage = '{0}.{1}.I.channel.{2}.image.e_tefit.fits'.format(field,spw,chanlinetype)
     mfshdu[0].data = e_tefit
-    mfshdu.writeto(e_tefitimage, overwrite=True)
+    mfshdu.writeto(e_tefitimage, overwrite=True, output_verify='fix+warn')
     goodplots.append(('tefit',spw,tefitimage,e_tefitimage))
     return goodplots
 
-def main(field,spws='',uvtaper=False,imsmooth=False,stack=False):
+def main(field,spws='',uvtaper=False,imsmooth=False,stack=False,
+         smogrid_start=None, smogrid_res=None, smogrid_end=None):
     """
     For each line spectral window, generate:
     1. continuum-subtracted cube
@@ -442,6 +505,21 @@ def main(field,spws='',uvtaper=False,imsmooth=False,stack=False):
       stack :: boolean
         If True, also generate a stacked image (no weighting)
         and compute te, etc.
+      smogrid_start :: scalar
+        The starting velocity of the re-gridded velocity axis.
+        If None, the data aren't regridded, except for the stacked
+        spectrum which uses the parameters of the worst resolution
+        spectral window.
+      smogrid_res :: scalar
+        The resolution of the smoothed and re-gridded velocity axis.
+        If None, the data aren't regridded, except for the stacked
+        spectrum which uses the parameters of the worst resolution
+        spectral window.
+      smogrid_end :: scalar
+        The ending velocity of the re-gridded velocity axis.
+        If None, the data aren't regridded, except for the stacked
+        spectrum which uses the parameters of the worst resolution
+        spectral window.
 
     Returns: Nothing
     """
@@ -449,6 +527,13 @@ def main(field,spws='',uvtaper=False,imsmooth=False,stack=False):
     if uvtaper: linetype += '.uvtaper'
     linetype += '.pbcor'
     if imsmooth: linetype += '.imsmooth'
+    #
+    # Generate smoothed velocity axis
+    #
+    smogrid_velocity = None
+    if smogrid_res is not None:
+        smogrid_velocity = np.arange(smogrid_start, smogrid_end+smogrid_res,
+                                     smogrid_res)
     #
     # Loop over spectral windows
     #
@@ -458,11 +543,13 @@ def main(field,spws='',uvtaper=False,imsmooth=False,stack=False):
         #
         # Process the data
         #
-        mfsimage = '{0}.spw{1}.mfs.{2}.image.fits'.format(field, spw, linetype)
+        mfsimage = '{0}.spw{1}.I.mfs.{2}.image.fits'.format(field, spw, linetype)
         if not os.path.exists(mfsimage):
+            print("{0} not found".format(mfsimage))
             continue
-        plots = process(field, spw, uvtaper=uvtaper, imsmooth=imsmooth)
-        goodplots += plots
+        plots = process(field, spw, uvtaper=uvtaper, imsmooth=imsmooth,
+                        smogrid_velocity=smogrid_velocity)
+        # goodplots += plots
     #
     # Stack the data without weighting
     #
@@ -473,52 +560,75 @@ def main(field,spws='',uvtaper=False,imsmooth=False,stack=False):
         #
         mfsdata = []
         chandata = []
+        maskdata = []
         freqs = []
         for spw in spws.split(','):
-            mfsimage = '{0}.spw{1}.mfs.{2}.image.fits'.format(field,spw,linetype)
+            # get MFS data
+            mfsimage = '{0}.spw{1}.I.mfs.{2}.image.fits'.format(field,spw,linetype)
             if not os.path.exists(mfsimage):
                 continue
             mfshdu = fits.open(mfsimage)
             mymfsdata = mfshdu[0].data
             mymfsdata[mymfsdata == 0.] = np.nan
             mfsdata.append(mymfsdata)
-            chanimage = '{0}.spw{1}.channel.{2}.image.fits'.format(field,spw,linetype)
+            # Get channel data
+            chanimage = '{0}.spw{1}.I.channel.{2}.image.fits'.format(field,spw,linetype)
+            if smogrid_velocity is not None:
+                chanimage = '{0}.spw{1}.I.channel.{2}.smogrid.image.fits'.format(field,spw,linetype)
             chanhdu = fits.open(chanimage)
             mychandata = chanhdu[0].data
             mychandata[mychandata == 0.] = np.nan
             chandata.append(chanhdu[0].data)
             freqs.append(mfshdu[0].header['RESTFRQ'])
+            # get mask data
+            fullrgn = '*.notaper.spw{0}.fullrgn.fits'.format(spw)
+            if uvtaper: fullrgn = '*.uvtaper.spw{0}.fullrgn.fits'.format(spw)
+            if imsmooth: fullrgn = '*.imsmooth.spw{0}.fullrgn.fits'.format(spw)
+            if uvtaper and imsmooth: fullrgn = '*.uvtaper.imsmooth.spw{0}.fullrgn.fits'.format(spw)
+            masks = glob.glob(fullrgn)
+            cliprgn = np.zeros(mfshdu[0].data.shape, dtype=np.bool)
+            for mask in masks:
+                fullrgnhdu = fits.open(mask)
+                fullrgn_data = np.array(fullrgnhdu[0].data,dtype=np.bool)
+                cliprgn = cliprgn | fullrgn_data
+            maskdata.append(cliprgn)
         #
         # Create average and save to file
         #
         freqavg = np.mean(freqs)
         # MFS
         mfsavg = np.mean(mfsdata, axis=0)
-        mfsavgimage = '{0}.all.mfs.{1}.image.fits'.format(field,linetype)
+        mfsavgimage = '{0}.all.I.mfs.{1}.image.fits'.format(field,linetype)
         mfshdu[0].data = mfsavg
         mfshdu[0].header['RESTFRQ'] = freqavg
-        mfshdu.writeto(mfsavgimage, overwrite=True)
+        mfshdu.writeto(mfsavgimage, overwrite=True, output_verify='fix+warn')
         # Channel
         chanavg = np.mean(chandata, axis=0)
-        chanavgimage = '{0}.all.channel.{1}.image.fits'.format(field,linetype)
+        chanavgimage = '{0}.all.I.channel.{1}.image.fits'.format(field,linetype)
         chanhdu[0].data = chanavg
         chanhdu[0].header['RESTFRQ'] = freqavg
-        chanhdu.writeto(chanavgimage, overwrite=True)
+        chanhdu.writeto(chanavgimage, overwrite=True, output_verify='fix+warn')
+        # Mask
+        allmask = np.sum(maskdata, axis=0, dtype=np.bool).astype(np.int)
+        chanavgimage = field
+        if uvtaper:
+            chanavgimage += '.uvtaper'
+        else:
+            chanavgimage += '.notaper'
+        if imsmooth: chanavgimage += '.imsmooth'
+        chanavgimage += '.all.fullrgn.fits'
+        mfshdu[0].data = allmask
+        mfshdu.writeto(chanavgimage, overwrite=True, output_verify='fix+warn')
         #
         # Process the stacked images
         #
-        plots = process(field, 'all', uvtaper=uvtaper, imsmooth=imsmooth)
+        plots = process(field, 'all', uvtaper=uvtaper, imsmooth=imsmooth,
+                        smogrid_velocity=None)
         goodplots += plots
     #
     # Generate PDFs of plots
     #
-    linesum_plots = []
-    specrms_plots = []
-    lineflux_plots = []
-    linevlsr_plots = []
-    linefwhm_plots = []
-    tesum_plots = []
-    tefit_plots = []
+    all_plots = []
     for plot in goodplots:
         plottype = plot[0]
         spw = plot[1]
@@ -622,38 +732,18 @@ def main(field,spws='',uvtaper=False,imsmooth=False,stack=False):
         #
         # Save plot filenames for master PDF
         #
-        if plottype == 'linesum':
-            linesum_plots.append(fname)
-        elif plottype == 'specrms':
-            specrms_plots.append(fname)
-        elif plottype == 'lineflux':
-            lineflux_plots.append(fname)
-            lineflux_plots.append(e_fname)
-        elif plottype == 'linevlsr':
-            linevlsr_plots.append(fname)
-            linevlsr_plots.append(e_fname)
-        elif plottype == 'linefwhm':
-            linefwhm_plots.append(fname)
-            linefwhm_plots.append(e_fname)
-        elif plottype == 'tesum':
-            tesum_plots.append(fname)
-            tesum_plots.append(e_fname)
-        elif plottype == 'tefit':
-            tefit_plots.append(fname)
-            tefit_plots.append(e_fname)
+        all_plots.append(fname)
+        if e_fitsfname is not None:
+            all_plots.append(e_fname)
     #
     # Generate PDF
     #
-    plots = [linesum_plots,specrms_plots,lineflux_plots,
-             linevlsr_plots,linefwhm_plots,tesum_plots,tefit_plots]
-    names = ['linesum','specrms','lineflux','linevlsr','linefwhm',
-             'tesum','tefit']
-    for plot,name in zip(plots,names):
+    if len(all_plots) > 0:
         fname = field
         if uvtaper: fname += '.uvtaper'
         if imsmooth: fname += '.imsmooth'
-        fname += '.{0}.tex'.format(name)
-        plotfiles = ['{'+fn.replace('.pdf','')+'}.pdf' for fn in plot]
+        fname += '.teimages.pdf'
+        plotfiles = ['{'+fn.replace('.pdf','')+'}.pdf' for fn in all_plots]
         with open(fname,'w') as f:
             f.write(r"\documentclass{article}"+"\n")
             f.write(r"\usepackage{graphicx}"+"\n")

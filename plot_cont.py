@@ -28,6 +28,7 @@ Trey V. Wenger November 2018 - V1.0
 """
 
 import os
+
 import sys
 import numpy as np
 from scipy.optimize import curve_fit

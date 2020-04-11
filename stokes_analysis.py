@@ -29,6 +29,7 @@ Trey V. Wenger September 2019 - V2.0
 """
 
 import os
+
 import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
@@ -47,7 +48,7 @@ def main(field,regions,spws,label,
     Inputs:
       field :: string
         The field name
-      region :: list of strings
+      regions :: list of strings
         If only one element, the region file used to analyze each
         spw. Otherwise, the region file to use for each spw.
       spws :: string
@@ -183,6 +184,8 @@ def main(field,regions,spws,label,
             # Read region file, extract data from region center pixel
             #
             if not os.path.exists(region):
+                area_pixel = np.nan
+                area_arsec = np.nan
                 cont = [np.nan for ind in stokes]
                 e_cont = [np.nan for ind in stokes]
                 map_mean = [np.nan for ind in stokes]

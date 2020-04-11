@@ -26,6 +26,7 @@ Trey V. Wenger December 2019 - V1.0
 """
 
 import os
+
 import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.io import fits

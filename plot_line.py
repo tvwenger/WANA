@@ -31,6 +31,7 @@ Trey V. Wenger November 2018 - V1.0
 """
 
 import os
+
 import sys
 import numpy as np
 import matplotlib.pyplot as plt

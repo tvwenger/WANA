@@ -27,6 +27,8 @@ Trey V. Wenger November 2018 - V1.0
 
 Trey V. Wenger September 2019 - V2.0
    Update to WISP V2.0 including Stokes
+   Compute watershed regions based on image_data * distance from
+   background to handle very confused regions.
 """
 
 import os
@@ -79,6 +81,7 @@ def main(field,spws,stokes='I',taper=False,imsmooth=False,
     if imsmooth: rgnend += '.imsmooth'
     rgnend += '.rgn'
     peakregions = glob.glob('*{0}'.format(rgnend))
+    peakregions.sort()
     peak_positions = []
     for peakregion in peakregions:
         # read second line in region file
@@ -130,7 +133,8 @@ def main(field,spws,stokes='I',taper=False,imsmooth=False,
         #
         rms = 1.4826*np.nanmedian(np.abs(residual_data-np.nanmedian(residual_data)))
         clip = image_data < sigmaclip*rms
-        image_data[clip] = 0.
+        image_clip = np.ones(image_data.shape, dtype=int)
+        image_clip[clip] = 0
         #
         # Compute pixel positions of peak regions
         # N.B. Flip to match WCS
@@ -148,11 +152,12 @@ def main(field,spws,stokes='I',taper=False,imsmooth=False,
         #
         # Compute distance to background
         #
-        distance = nd.distance_transform_edt(image_data)
+        distance = nd.distance_transform_edt(image_clip)
         #
         # Perform watershed segmentation
         #
-        result = watershed(-distance,seed_locations,mask=image_data>0.)
+        result = watershed(-distance*image_data, seed_locations,
+                           mask=image_clip)
         #
         # For each peak region, find associated watershed region
         # and save as boolean mask fits image

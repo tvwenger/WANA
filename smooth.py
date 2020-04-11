@@ -31,6 +31,7 @@ Trey V. Wenger September 2019 - V2.0
 import __main__ as casa
 import os
 import numpy as np
+from astropy.io import fits
 
 __version__ = "2.0"
 
@@ -68,44 +69,52 @@ def smooth_all(field, spws='', stokes='', imagetype='clean',
     images = ['{0}.{1}.{2}.mfs.{3}.image.fits'.format(field, spw, stokes, imagetype)
               for spw in myspws
               if os.path.exists('{0}.{1}.{2}.mfs.{3}.image.fits'.format(field,spw,stokes,imagetype))]
-    # primary-beam images
-    pbimages = [image.replace('.image.fits','.pbcor.image.fits') for image in images]
     # residual images
     resimages = [image.replace('.image.fits','.residual.fits') for image in images]
     # cubes
     cubes = ['{0}.{1}.{2}.channel.{3}.image.fits'.format(field,spw,stokes,imagetype)
              for spw in myspws if os.path.exists('{0}.{1}.{2}.channel.{3}.image.fits'.format(field,spw,stokes,imagetype))]
-    # primary beam cubes
-    pbcubes = [cube.replace('.image.fits','.pbcor.image.fits') for cube in cubes]
     # residual cubes
     rescubes = [cube.replace('.image.fits','.residual.fits') for cube in cubes]
-    for imagename in images+cubes:
-        if 'perplanebeams' in casa.imhead(imagename).keys():
-            beams = casa.imhead(imagename)['perplanebeams']['beams']
-            bmajs.append(np.max([beams[key]['*0']['major']['value'] for key in beams.keys()]))
-            bmins.append(np.max([beams[key]['*0']['minor']['value'] for key in beams.keys()]))
-        else:
-            bmajs.append(casa.imhead(imagename,mode='get',
-                         hdkey='beammajor')['value'])
-            bmins.append(casa.imhead(imagename,mode='get',
-                         hdkey='beamminor')['value'])
+    for imagename, resimagename in zip(images+cubes, resimages+rescubes):
+        with fits.open(imagename) as imhdulist:
+            bunit = imhdulist[0].header['BUNIT']
+            if len(imhdulist) > 1:
+                bmaj = imhdulist[1].data['BMAJ'][0] # arcsec
+                bmin = imhdulist[1].data['BMIN'][0] # arcsec
+                bpa = imhdulist[1].data['BPA'][0]
+            else:
+                bmaj = imhdulist[0].header['BMAJ'] * 3600. # arcsec
+                bmin = imhdulist[0].header['BMIN'] * 3600. # arcsec
+                bpa = imhdulist[0].header['BPA']
+            # check that residual images have beams and units
+            with fits.open(resimagename, 'update') as reshdulist:
+                if 'BMIN' not in reshdulist[0].header:
+                    reshdulist[0].header['BMIN'] = bmin/3600. # deg
+                    reshdulist[0].header['BMAJ'] = bmaj/3600. # deg
+                    reshdulist[0].header['BPA'] = bpa
+                if not reshdulist[0].header['BUNIT']:
+                    reshdulist[0].header['BUNIT'] = bunit
+            # check that residual images have units
+            # append
+            bmajs.append(bmaj)
+            bmins.append(bmin)
     #
     # Smooth available images to maximum (circular) beam size
-    # + 0.1 pixel size (otherwise imsmooth will complain)
+    # + pixel diagonal size (otherwise imsmooth will complain)
     #
     cell_size = abs(casa.imhead(imagename)['incr'][0]) * 206265.
-    bmaj_target = np.max(bmajs)+0.1*cell_size
-    bmin_target = np.max(bmajs)+0.1*cell_size
+    bmaj_target = np.max(bmajs)+1.42*cell_size
+    bmin_target = np.max(bmajs)+1.42*cell_size
     bpa_target = 0.
     print("Smoothing all images to")
-    print("Major axis: {0} arcsec".format(bmaj_target))
-    print("Minor axis: {0} arcsec".format(bmin_target))
-    print("Position angle: {0} degs".format(bpa_target))
+    print("Major axis: {0:.2f} arcsec".format(bmaj_target))
+    print("Minor axis: {0:.2f} arcsec".format(bmin_target))
+    print("Position angle: {0:.2f} degs".format(bpa_target))
     bmaj_target = {'unit':'arcsec','value':bmaj_target}
     bmin_target = {'unit':'arcsec','value':bmin_target}
     bpa_target = {'unit':'deg','value':bpa_target}
-    for imagename,pbimagename,resimagename in \
-      zip(images+cubes,pbimages+pbcubes,resimages+rescubes):
+    for imagename, resimagename in zip(images+cubes, resimages+rescubes):
         # export velocity axis if this is a cube
         velocity = 'channel' in imagename
         # smooth image
@@ -115,13 +124,21 @@ def smooth_all(field, spws='', stokes='', imagetype='clean',
                       pa=bpa_target,outfile=outfile,overwrite=overwrite)
         casa.exportfits(imagename=outfile,fitsimage='{0}.fits'.format(outfile),
                         velocity=velocity,overwrite=True,history=False)
-        # smooth pb image
-        outfile = pbimagename.replace('.image.fits','.imsmooth.image')
-        casa.imsmooth(imagename=pbimagename,kernel='gauss',
-                      targetres=True,major=bmaj_target,minor=bmin_target,
-                      pa=bpa_target,outfile=outfile,overwrite=overwrite)
+        # primary beam correct
+        smoimagename = outfile
+        pbimage = imagename.replace('.{0}.image.fits'.format(imagetype), '.pb.fits')
+        outfile = imagename.replace('.image.fits', '.pbcor.imsmooth.image')
+        casa.impbcor(imagename=smoimagename, pbimage=pbimage,
+                     outfile=outfile, overwrite=True)
         casa.exportfits(imagename=outfile,fitsimage='{0}.fits'.format(outfile),
                         velocity=velocity,overwrite=True,history=False)
+        # check that residual image has beam size, if not add it
+        with fits.open(resimagename, 'update') as hdulist:
+            hdu = hdulist[0]
+            if 'BMIN' not in hdu.header:
+                hdu.header['BMIN'] = bmin_target['value']/3600.
+                hdu.header['BMAJ'] = bmaj_target['value']/3600.
+                hdu.header['BPA'] = bpa_target['value']
         # smooth residual image
         outfile = resimagename.replace('.residual.fits','.imsmooth.residual')
         casa.imsmooth(imagename=resimagename,kernel='gauss',

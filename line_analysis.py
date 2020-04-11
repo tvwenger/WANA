@@ -31,6 +31,7 @@ Trey V. Wenger September 2019 -V2.0
 """
 
 import os
+
 import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
@@ -308,8 +309,15 @@ class ClickPlot:
         # If not batch-mode, wait for user to review
         #
         if not auto:
-            print("Click anywhere to continue")
+            self.clickbutton = []
+            cid = self.fig.canvas.mpl_connect('button_press_event',
+                                              self.onclick)
+            print("Right-click to redo, left-click to accept")
             self.fig.waitforbuttonpress()
+            self.fig.canvas.mpl_disconnect(cid)
+            if 3 in self.clickbutton:
+                return False
+        return True
 
     def get_gauss(self,xdata,ydata,xlabel=None,ylabel=None,title=None):
         """
@@ -393,6 +401,8 @@ class ClickPlot:
             self.ax.axvline(self.clickx_data[-1])
             self.fig.show()
             guesses.append(self.clickx_data[-1])
+        if (len(guesses) == 1) or ((len(guesses)-1) % 2 != 0):
+            return self.get_gauss(xdata,ydata,xlabel=xlabel,ylabel=ylabel,title=title)
         #
         # Save estimates as arrays
         #
@@ -601,8 +611,15 @@ class ClickPlot:
         # Wait for user to review
         #
         if not auto:
-            print("Click anywhere to continue")
+            self.clickbutton = []
+            cid = self.fig.canvas.mpl_connect('button_press_event',
+                                              self.onclick)
+            print("Right-click to re-do, left click to accept")
             self.fig.waitforbuttonpress()
+            self.fig.canvas.mpl_disconnect(cid)
+            if 3 in self.clickbutton:
+                return False
+        return True
 
 def dump_spec(imagename,region,fluxtype):
     """
@@ -751,7 +768,7 @@ def smooth_regrid(specdata, velocity):
     Inputs: specdata, velocity
       specdata :: ndarray
         array with columns 'channel', 'velocity', and 'flux'
-      smogrid_start :: 1-D array of scalars
+      velocity :: 1-D array of scalars
         The new velocity axis at which to interpolate velocities
 
     Returns: specdata
@@ -767,7 +784,7 @@ def smooth_regrid(specdata, velocity):
                          if (specdata['velocity'][0] < v < specdata['velocity'][-1])
                          else np.zeros(len(specdata['velocity']))*np.nan
                          for v in velocity])
-    flux = np.array([np.sum(wt*specdata['flux'])/np.sum(wt)
+    flux = np.array([np.nansum(wt*specdata['flux'])/np.sum(wt)
                      for wt in sinc_wts])
     channel = np.arange(len(velocity))
     new_specdata = np.zeros((len(velocity)),
@@ -835,34 +852,37 @@ def fit_line(title,region,fluxtype,specdata,outfile,auto=False):
     # Get line-free regions
     #
     title = '{0}\n{1}'.format(title,region)
-    if not auto:
-        regions = myplot.line_free(specdata_velocity,specdata_flux,
+    while True:
+        if not auto:
+            regions = myplot.line_free(specdata_velocity,specdata_flux,
+                                       xlabel='Velocity (km/s)',ylabel=ylabel,
+                                       title=title)
+        else:
+            logger.info("Automatically finding line-free regions")
+            regions = myplot.auto_line_free(specdata_velocity,specdata_flux,
+                                            xlabel='Velocity (km/s)',ylabel=ylabel,
+                                            title=title)
+            logger.info("Done.")
+        #
+        # Extract line free velocity and flux
+        #
+        line_free_mask = np.zeros(specdata_velocity.size,dtype=bool)
+        for reg in regions:
+            line_free_mask[(specdata_velocity>reg[0])&(specdata_velocity<reg[1])] = True
+        line_free_velocity = specdata_velocity[line_free_mask]
+        line_free_flux = specdata_flux[line_free_mask]
+        #
+        # Fit baseline as polyonimal order 3
+        #
+        logger.info("Fitting continuum baseline polynomial...")
+        pfit = np.polyfit(line_free_velocity,line_free_flux,3)
+        contfit = np.poly1d(pfit)
+        done = myplot.plot_contfit(specdata_velocity,specdata_flux,contfit,
                                    xlabel='Velocity (km/s)',ylabel=ylabel,
-                                   title=title)
-    else:
-        logger.info("Automatically finding line-free regions")
-        regions = myplot.auto_line_free(specdata_velocity,specdata_flux,
-                                        xlabel='Velocity (km/s)',ylabel=ylabel,
-                                        title=title)
+                                   title=title,auto=auto)
         logger.info("Done.")
-    #
-    # Extract line free velocity and flux
-    #
-    line_free_mask = np.zeros(specdata_velocity.size,dtype=bool)
-    for reg in regions:
-        line_free_mask[(specdata_velocity>reg[0])&(specdata_velocity<reg[1])] = True
-    line_free_velocity = specdata_velocity[line_free_mask]
-    line_free_flux = specdata_flux[line_free_mask]
-    #
-    # Fit baseline as polyonimal order 3
-    #
-    logger.info("Fitting continuum baseline polynomial...")
-    pfit = np.polyfit(line_free_velocity,line_free_flux,3)
-    contfit = np.poly1d(pfit)
-    myplot.plot_contfit(specdata_velocity,specdata_flux,contfit,
-                        xlabel='Velocity (km/s)',ylabel=ylabel,
-                        title=title,auto=auto)
-    logger.info("Done.")
+        if done:
+            break
     #
     # Subtract continuum
     #
@@ -879,69 +899,25 @@ def fit_line(title,region,fluxtype,specdata,outfile,auto=False):
     #
     # Re-plot spectrum, get Gaussian fit estimates, fit Gaussian
     #
-    if not auto:
-        line_start,center_guesses,sigma_guesses,line_end = \
-            myplot.get_gauss(specdata_velocity,flux_contsub,
-                             xlabel='Velocity (km/s)',ylabel=ylabel,
-                             title=title)
-    else:
-        logger.info("Automatically estimating Gaussian fit parameters...")
-        line_start,center_guesses,sigma_guesses,line_end = \
-            myplot.auto_get_gauss(specdata_velocity,flux_contsub,
-                                  xlabel='Velocity (km/s)',
-                                  ylabel=ylabel,title=title)
-        logger.info("Done.")
-    #
-    # Check that there is a line to fit
-    #
-    if (None in [line_start,line_end] or None in center_guesses
-        or None in sigma_guesses):
-        # No line to fit
-        line_brightness = np.array([np.nan])
-        e_line_brightness = np.array([np.nan])
-        line_center = np.array([np.nan])
-        e_line_center = np.array([np.nan])
-        line_sigma = np.array([np.nan])
-        e_line_sigma = np.array([np.nan])
-        line_fwhm = np.array([np.nan])
-        e_line_fwhm = np.array([np.nan])
-    else:
-        center_idxs = np.array([np.argmin(np.abs(specdata_velocity-c))
-                                for c in center_guesses])
-        amp_guesses = flux_contsub[center_idxs]
+    while True:
+        if not auto:
+            line_start,center_guesses,sigma_guesses,line_end = \
+                myplot.get_gauss(specdata_velocity,flux_contsub,
+                                 xlabel='Velocity (km/s)',ylabel=ylabel,
+                                 title=title)
+        else:
+            logger.info("Automatically estimating Gaussian fit parameters...")
+            line_start,center_guesses,sigma_guesses,line_end = \
+                myplot.auto_get_gauss(specdata_velocity,flux_contsub,
+                                      xlabel='Velocity (km/s)',
+                                      ylabel=ylabel,title=title)
+            logger.info("Done.")
         #
-        # Extract line velocity and fluxes
+        # Check that there is a line to fit
         #
-        line_mask = (specdata_velocity>line_start)&(specdata_velocity<line_end)
-        line_flux = flux_contsub[line_mask]
-        line_velocity = specdata_velocity[line_mask]
-        #
-        # Fit gaussian to data
-        #
-        logger.info("Fitting Gaussian...")
-        try:
-            p0 = []
-            bounds_lower = []
-            bounds_upper = []
-            for a,c,s in zip(amp_guesses,center_guesses,sigma_guesses):
-                p0 += [a,c,s]
-                bounds_lower += [0,line_start,0]
-                bounds_upper += [np.inf,line_end,np.inf]
-            bounds = (bounds_lower,bounds_upper)
-            popt,pcov = curve_fit(gaussian,line_velocity,line_flux,
-                                  p0=p0,bounds=bounds,
-                                  sigma=np.ones(line_flux.size)*rms,
-                                  absolute_sigma=True)
-            line_brightness = popt[0::3]
-            e_line_brightness = np.sqrt(np.diag(pcov)[0::3])
-            line_center = popt[1::3]
-            e_line_center = np.sqrt(np.diag(pcov)[1::3])
-            line_sigma = np.abs(popt[2::3])
-            e_line_sigma = np.sqrt(np.abs(np.diag(pcov)[2::3]))
-            line_fwhm = 2.*np.sqrt(2.*np.log(2.))*line_sigma
-            e_line_fwhm = 2.*np.sqrt(2.*np.log(2.))*e_line_sigma
-        except:
-            # Fit failed
+        if (None in [line_start,line_end] or None in center_guesses
+            or None in sigma_guesses):
+            # No line to fit
             line_brightness = np.array([np.nan])
             e_line_brightness = np.array([np.nan])
             line_center = np.array([np.nan])
@@ -950,36 +926,84 @@ def fit_line(title,region,fluxtype,specdata,outfile,auto=False):
             e_line_sigma = np.array([np.nan])
             line_fwhm = np.array([np.nan])
             e_line_fwhm = np.array([np.nan])
-        logger.info("Done.")
-    #
-    # Check that line parameters are sane:
-    # - centers are not within FWHM of edge
-    # - FWHM are not < 5 km/s
-    # - FWHM are not > 200 km/s
-    # - intensity and FWHM errors are not > 100%
-    #
-    for ngauss in range(len(line_brightness)):
-        if ((line_center[ngauss] - line_fwhm[ngauss] < np.min(specdata_velocity)) or
-            (line_center[ngauss] + line_fwhm[ngauss] > np.max(specdata_velocity)) or
-            (line_fwhm[ngauss] < 5.) or (line_fwhm[ngauss] > 200.) or
-            (e_line_brightness[ngauss]/line_brightness[ngauss] > 1.0) or
-            (e_line_fwhm[ngauss]/line_fwhm[ngauss] > 1.0)):
-            line_brightness[ngauss] = np.nan
-            e_line_brightness[ngauss] = np.nan
-            line_center[ngauss] = np.nan
-            e_line_center[ngauss] = np.nan
-            line_sigma[ngauss] = np.nan
-            e_line_sigma[ngauss] = np.nan
-            line_fwhm[ngauss] = np.nan
-            e_line_fwhm[ngauss] = np.nan
-    #
-    # Plot fit
-    #
-    myplot.plot_fit(specdata_velocity,flux_contsub,
-                    line_start,line_end,
-                    line_brightness,line_center,line_sigma,
-                    xlabel='Velocity (km/s)',ylabel=ylabel,title=title,
-                    outfile=outfile,auto=auto)
+        else:
+            center_idxs = np.array([np.argmin(np.abs(specdata_velocity-c))
+                                    for c in center_guesses])
+            amp_guesses = flux_contsub[center_idxs]
+            #
+            # Extract line velocity and fluxes
+            #
+            line_mask = (specdata_velocity>line_start)&(specdata_velocity<line_end)
+            line_flux = flux_contsub[line_mask]
+            line_velocity = specdata_velocity[line_mask]
+            #
+            # Fit gaussian to data
+            #
+            logger.info("Fitting Gaussian...")
+            try:
+                p0 = []
+                bounds_lower = []
+                bounds_upper = []
+                for a,c,s in zip(amp_guesses,center_guesses,sigma_guesses):
+                    p0 += [a,c,s]
+                    bounds_lower += [0,line_start,0]
+                    bounds_upper += [np.inf,line_end,np.inf]
+                bounds = (bounds_lower,bounds_upper)
+                popt,pcov = curve_fit(gaussian,line_velocity,line_flux,
+                                      p0=p0,bounds=bounds,
+                                      sigma=np.ones(line_flux.size)*rms,
+                                      absolute_sigma=True)
+                line_brightness = popt[0::3]
+                e_line_brightness = np.sqrt(np.diag(pcov)[0::3])
+                line_center = popt[1::3]
+                e_line_center = np.sqrt(np.diag(pcov)[1::3])
+                line_sigma = np.abs(popt[2::3])
+                e_line_sigma = np.sqrt(np.abs(np.diag(pcov)[2::3]))
+                line_fwhm = 2.*np.sqrt(2.*np.log(2.))*line_sigma
+                e_line_fwhm = 2.*np.sqrt(2.*np.log(2.))*e_line_sigma
+            except:
+                # Fit failed
+                line_brightness = np.array([np.nan])
+                e_line_brightness = np.array([np.nan])
+                line_center = np.array([np.nan])
+                e_line_center = np.array([np.nan])
+                line_sigma = np.array([np.nan])
+                e_line_sigma = np.array([np.nan])
+                line_fwhm = np.array([np.nan])
+                e_line_fwhm = np.array([np.nan])
+            logger.info("Done.")
+        #
+        # Check that line parameters are sane:
+        # - centers are not within FWHM of edge
+        # - FWHM are not < 5 km/s
+        # - FWHM are not > 200 km/s
+        # - intensity and FWHM errors are not > 100%
+        #
+        for ngauss in range(len(line_brightness)):
+            if ((line_center[ngauss] - line_fwhm[ngauss] < np.min(specdata_velocity)) or
+                (line_center[ngauss] + line_fwhm[ngauss] > np.max(specdata_velocity)) or
+                (line_fwhm[ngauss] < 5.) or (line_fwhm[ngauss] > 200.) or
+                (e_line_brightness[ngauss]/line_brightness[ngauss] > 1.0) or
+                (e_line_fwhm[ngauss]/line_fwhm[ngauss] > 1.0)):
+                line_brightness[ngauss] = np.nan
+                e_line_brightness[ngauss] = np.nan
+                line_center[ngauss] = np.nan
+                e_line_center[ngauss] = np.nan
+                line_sigma[ngauss] = np.nan
+                e_line_sigma[ngauss] = np.nan
+                line_fwhm[ngauss] = np.nan
+                e_line_fwhm[ngauss] = np.nan
+        #
+        # Plot fit
+        #
+        done = myplot.plot_fit(specdata_velocity,flux_contsub,
+                               line_start,line_end,
+                               line_brightness,line_center,line_sigma,
+                               xlabel='Velocity (km/s)',ylabel=ylabel,
+                               title=title,
+                               outfile=outfile,auto=auto)
+        if done:
+            break
     return (line_brightness, e_line_brightness, line_fwhm, e_line_fwhm,
             line_center, e_line_center, cont_brightness, rms)
 
@@ -1080,7 +1104,7 @@ def main(field,regions,spws,pdflabel,stokes='I',
          smogrid_start=None, smogrid_res=None, smogrid_end=None,
          fluxtype='peak',taper=False,imsmooth=False,
          weight=True,outfile='line_info.txt',
-         config_file=None,auto=False):
+         config_file=None, auto=False, autostack=False):
     """
     Extract spectrum from region in each data cube, measure continuum
     brightess and fit Gaussian to measure RRL properties. Also fit stacked 
@@ -1136,6 +1160,9 @@ def main(field,regions,spws,pdflabel,stokes='I',
       auto :: boolean
         if True, automatically fit a single Gaussian component to
         each spectrum
+      autostack :: boolean
+        if True, automatically fit a single Gaussian component to the
+        stacked spectra
 
     Returns: Nothing
     """
@@ -1302,7 +1329,8 @@ def main(field,regions,spws,pdflabel,stokes='I',
             #
             # Get specdata for the spws in this stack
             #
-            stack_spws = my_stackedspws.split(',')
+            stack_spws = np.array([spw for spw in my_stackedspws.split(',')
+                                   if spw in all_spws])
             stack_inds = np.array([all_spws.index(spw) for spw in stack_spws])
             if len(stack_inds) == 0:
                 continue
@@ -1371,7 +1399,7 @@ def main(field,regions,spws,pdflabel,stokes='I',
             #
             line_brightness, e_line_brightness, line_fwhm, e_line_fwhm, \
               line_center, e_line_center, cont_brightness, rms = \
-              fit_line(imagetitle,region,fluxtype,avgspecdata,outfile,auto=auto)
+              fit_line(imagetitle,region,fluxtype,avgspecdata,outfile,auto=autostack)
             if line_brightness is None:
                 # skipping line
                 continue
@@ -1389,7 +1417,7 @@ def main(field,regions,spws,pdflabel,stokes='I',
             #
             # Check crazy, wonky fits if we're in auto mode
             #
-            if auto:
+            if autostack:
                 if np.any(line_brightness > 1.e6): # 1000 Jy
                     continue
                 if np.any(line_to_cont > 10.):

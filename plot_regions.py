@@ -29,9 +29,12 @@ Trey V. Wenger November 2018 - V1.0
 
 Trey V. Wenger September 2019 - V2.0
     Update for WISP V2.0 support (stokes image names)
+    Generate CASA region file identifying peaks associated with
+    WISE sources.
 """
 
 import os
+
 import glob
 import numpy as np
 import matplotlib.pyplot as plt
@@ -93,14 +96,31 @@ def main(field,spws,stokes='I',
           #                deg        deg         arcsec  
           G000.003+00.127  266.282628  -28.866597   206.70
           ...
+          N.B. Size is IR radius
       levels :: list of scalars
         The contour levels as multiplicative factor of RMS noise
         in non-PB corrected MFS image.
 
     Returns: Nothing
     """
+    #
+    # Get peak regions
+    #
+    rgnend = '.notaper'
+    if taper:
+        rgnend = '.uvtaper'
+    if imsmooth:
+        rgnend += '.imsmooth'
+    rgnend += '.rgn'
+    peak_regions = glob.glob('*{0}'.format(rgnend))
+    peak_regions.sort()
+    #
     # convert levels to array
+    #
     levels = np.array(levels)
+    #
+    # Loop over spws
+    #
     outimages = []
     for spw in spws.split(','):
         #
@@ -201,15 +221,124 @@ def main(field,spws,stokes='I',
                             edgecolor='black',facecolor='white')
             ax.add_patch(ellipse)
         #
+        # Plot WISE Catalog regions
+        #
+        if wisefile is not None:
+            wisedata = np.genfromtxt(wisefile,dtype=None,names=True,encoding='UTF-8')
+            # limit only to regions with centers within image
+            corners = wcs_celest.calc_footprint()
+            min_RA = np.min(corners[:,0])
+            max_RA = np.max(corners[:,0])
+            RA_range = max_RA - min_RA
+            min_Dec = np.min(corners[:,1])
+            max_Dec = np.max(corners[:,1])
+            Dec_range = max_Dec - min_Dec
+            good = (min_RA < wisedata['RA'])&(wisedata['RA'] < max_RA)&(min_Dec < wisedata['Dec'])&(wisedata['Dec'] < max_Dec)
+            # plot them
+            wisedata = wisedata[good]
+            for dat in wisedata:
+                xpos,ypos = wcs_celest.wcs_world2pix(dat['RA'],dat['Dec'],1)
+                diameter = dat['Size']*2./3600./pixsize
+                ell = Ellipse((xpos,ypos),diameter,diameter,
+                               color='y',fill=False,linestyle='dashed',zorder=100)
+                ax.add_patch(ell)
+                ax.text(dat['RA'],dat['Dec'],dat['GName'],transform=ax.get_transform('world'),fontsize=2,zorder=100)
+            # add legend element
+            ell = Ellipse((0,0),0.1,0.1,color='y',fill=False,
+                          linestyle='dashed',label='WISE Catalog')
+            patches = [ell]
+            wise_legend = plt.legend(handles=patches,loc='lower right',fontsize=6,
+                                     handler_map={Ellipse: HandlerEllipse()})
+            ax.add_artist(wise_legend)
+            #
+            # Identify peaks if they don't already exist
+            #
+            if len(peak_regions) == 0:
+                #
+                # Generate pixel axes
+                #
+                axx = np.arange(1, image_hdu.header['NAXIS1']+1)
+                axy = np.arange(1, image_hdu.header['NAXIS2']+1)
+                pixx, pixy = np.meshgrid(axx, axy)
+                #
+                # Loop over WISE sources within field
+                #
+                peak_pixs = []
+                peak_gnames = []
+                peak_seps = []
+                for dat in wisedata:
+                    #
+                    # Get image clipped at levels[0] * sigma
+                    #
+                    clip = image_hdu.data[0,0] > levels[0]*sigma
+                    #
+                    # Also clip within WISE region
+                    #
+                    xpos,ypos = wcs_celest.wcs_world2pix(dat['RA'],dat['Dec'],1)
+                    radius = dat['Size']/3600./pixsize
+                    clip = clip * ((pixx-xpos)**2. + (pixy-ypos)**2. < radius**2.)
+                    #
+                    # Skip if no bright emission within WISE region
+                    #
+                    if np.sum(clip) == 0:
+                        continue
+                    #
+                    # Get location of peak within PB-corrected image
+                    #
+                    clip_data = pbcorr_hdu.data[0,0] * clip
+                    peak_pix = np.nanargmax(clip_data)
+                    peak_pix = (pixx.flatten()[peak_pix],
+                                pixy.flatten()[peak_pix])
+                    #
+                    # Get separation between this peak and the
+                    # center of the WISE source
+                    #
+                    peak_sep = np.sqrt(
+                        (peak_pix[0]-xpos)**2. + (peak_pix[1]-ypos)**2.)
+                    #
+                    # If the peak position is on the edge of the WISE
+                    # region, then this emission is likely associated
+                    # with an overlapping WISE region, so skip it.
+                    # use a 1 pixel buffer.
+                    #
+                    if radius - peak_sep < 1.:
+                        continue
+                    #
+                    # Multiple WISE sources might have the same peak
+                    # pix if they overlap. In this case, choose the
+                    # smallest wise source.
+                    #
+                    if peak_pix in peak_pixs:
+                        idx = peak_pixs.index(peak_pix)
+                        if peak_sep < peak_seps[idx]:
+                            peak_seps[idx] = peak_sep
+                            peak_gnames[idx] = dat['GName']
+                    else:
+                        peak_pixs.append(peak_pix)
+                        peak_seps.append(peak_sep)
+                        peak_gnames.append(dat['GName'])
+                #
+                # Save region files
+                #
+                for pix, gname in zip(peak_pixs, peak_gnames):
+                    #
+                    # Convert pixel to WCS
+                    #
+                    ra, dec = wcs_celest.wcs_pix2world(pix[0], pix[1], 1)
+                    coord = SkyCoord(ra, dec, frame='fk5', unit=('deg', 'deg'))
+                    #
+                    # Save region file
+                    #
+                    rgnfname = '{0}{1}'.format(gname, rgnend)
+                    with open(rgnfname, 'w') as f:
+                        f.write('#CRTFv0 CASA Region Text Format version 0\n')
+                        f.write('ellipse [[{0:02d}:{1:02d}:{2:08.5f}, {3:+02d}.{4:02d}.{5:07.4f}], [1.0arcsec, 1.0arcsec], 90.00000000deg] coord=J2000, corr=[I, Q, U, V], linewidth=1, linestyle=-, symsize=1, symthick=1, color=magenta, font="DejaVu Sans", fontsize=11, fontstyle=normal, usetex=false\n'.format(
+                            int(coord.ra.hms.h), int(coord.ra.hms.m), coord.ra.hms.s,
+                            int(coord.dec.dms.d), int(abs(coord.dec.dms.m)), abs(coord.dec.dms.s)))
+                    peak_regions.append(rgnfname)
+        #
         # Plot regions
         #
-        rgnend = '.notaper'
-        if taper:
-            rgnend = '.uvtaper'
-        if imsmooth:
-            rgnend += '.imsmooth'
-        rgnend += '.rgn'
-        peak_regions = glob.glob('*{0}'.format(rgnend))
         full_regions = [reg.replace('.rgn','.{0}.fullrgn.fits'.format(spw)) for reg in peak_regions]
         labels = [reg.replace(rgnend,'') for reg in peak_regions]
         cmap_jet = plt.get_cmap('jet')
@@ -243,36 +372,6 @@ def main(field,spws,stokes='I',
         if len(peak_regions) > 0:
             region_legend = plt.legend(loc='upper right',fontsize=6)
             ax.add_artist(region_legend)
-        #
-        # Plot WISE Catalog regions
-        #
-        if wisefile is not None:
-            wisedata = np.genfromtxt(wisefile,dtype=None,names=True,encoding='UTF-8')
-            # limit only to regions with centers within image
-            corners = wcs_celest.calc_footprint()
-            min_RA = np.min(corners[:,0])
-            max_RA = np.max(corners[:,0])
-            RA_range = max_RA - min_RA
-            min_Dec = np.min(corners[:,1])
-            max_Dec = np.max(corners[:,1])
-            Dec_range = max_Dec - min_Dec
-            good = (min_RA < wisedata['RA'])&(wisedata['RA'] < max_RA)&(min_Dec < wisedata['Dec'])&(wisedata['Dec'] < max_Dec)
-            # plot them
-            wisedata = wisedata[good]
-            for dat in wisedata:
-                xpos,ypos = wcs_celest.wcs_world2pix(dat['RA'],dat['Dec'],1)
-                size = dat['Size']*2./3600./pixsize
-                ell = Ellipse((xpos,ypos),size,size,
-                               color='y',fill=False,linestyle='dashed',zorder=100)
-                ax.add_patch(ell)
-                ax.text(dat['RA'],dat['Dec'],dat['GName'],transform=ax.get_transform('world'),fontsize=2,zorder=100)
-            # add legend element
-            ell = Ellipse((0,0),0.1,0.1,color='y',fill=False,
-                          linestyle='dashed',label='WISE Catalog')
-            patches = [ell]
-            wise_legend = plt.legend(handles=patches,loc='lower right',fontsize=6,
-                                     handler_map={Ellipse: HandlerEllipse()})
-            ax.add_artist(wise_legend)
         #
         # Re-scale to fit, then save
         #
