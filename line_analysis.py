@@ -26,7 +26,7 @@ Changelog:
 Trey V. Wenger November 2018 - V1.0
 
 Trey V. Wenger September 2019 -V2.0
-    Update for WISP V2.0 with stokes parameter support
+    Update for WISP V2.0 with stokes and mosaic support
     Add smoothing and re-gridding
 """
 
@@ -174,6 +174,8 @@ class ClickPlot:
         nregions = []
         while True:
             self.fig.waitforbuttonpress()
+            if len(self.clickbutton) == 0:
+                continue
             if self.clickbutton[-1] == 3:
                 if len(nregions) == 0 or len(nregions) % 2 != 0:
                     continue
@@ -379,9 +381,14 @@ class ClickPlot:
                                           self.onclick)
         self.fig.tight_layout()
         self.fig.show()
-        self.fig.waitforbuttonpress()
-        if 3 in self.clickbutton:
-            return None,None,None,None
+        while True:
+            self.fig.waitforbuttonpress()
+            if len(self.clickbutton) == 0:
+                continue
+            if 3 in self.clickbutton:
+                return None,None,None,None
+            elif 1 in self.clickbutton:
+                break
         self.ax.axvline(self.clickx_data[-1])
         self.fig.show()
         line_start = self.clickx_data[-1]
@@ -396,11 +403,14 @@ class ClickPlot:
         print "Right click when finished."
         while True:
             self.fig.waitforbuttonpress()
+            if len(self.clickbutton) == 0:
+                continue
             if self.clickbutton[-1] == 3:
                 break
-            self.ax.axvline(self.clickx_data[-1])
-            self.fig.show()
-            guesses.append(self.clickx_data[-1])
+            elif self.clickbutton[-1] == 1:
+                self.ax.axvline(self.clickx_data[-1])
+                self.fig.show()
+                guesses.append(self.clickx_data[-1])
         if (len(guesses) == 1) or ((len(guesses)-1) % 2 != 0):
             return self.get_gauss(xdata,ydata,xlabel=xlabel,ylabel=ylabel,title=title)
         #
@@ -723,8 +733,8 @@ def dump_spec(imagename,region,fluxtype):
         # pixel
         #
         cubestats = np.array([[calc_linefreestats(cubedata[:,i,j])
-                               for j in range(cubedata.shape[-2])]
-                              for i in range(cubedata.shape[-1])])
+                               for j in range(cubedata.shape[-1])]
+                              for i in range(cubedata.shape[-2])])
         weights = cubestats[:,:,1] # median
         #
         # Computed weighted sum in each pixel
@@ -740,14 +750,7 @@ def dump_spec(imagename,region,fluxtype):
     # Save spectrum to file
     #
     logfile = '{0}.{1}.specflux'.format(imagename,region)
-    with open(logfile,'w') as f:
-        f.write('channel velocity flux\n')
-        if fluxtype == 'peak':
-            f.write('#       km/s     mJy/beam\n')
-        else:
-            f.write('#       km/s     mJy\n')
-        for chan,vel,sp in zip(channel,velocity,spec):
-            f.write('{0:7} {1:8.2f} {2:8.4f}\n'.format(chan,vel,sp))
+    save_spec(channel, velocity, spec, logfile, fluxtype)
     #
     # Import spectrum
     #
@@ -759,6 +762,16 @@ def dump_spec(imagename,region,fluxtype):
         return None
     else:
         return specdata
+
+def save_spec(channel, velocity, spec, logfile, fluxtype):
+    with open(logfile,'w') as f:
+        f.write('channel velocity flux\n')
+        if fluxtype == 'peak':
+            f.write('#       km/s     mJy/beam\n')
+        else:
+            f.write('#       km/s     mJy\n')
+        for chan,vel,sp in zip(channel,velocity,spec):
+            f.write('{0:7} {1:8.2f} {2:8.4f}\n'.format(chan,vel,sp))
 
 def smooth_regrid(specdata, velocity):
     """
@@ -888,6 +901,11 @@ def fit_line(title,region,fluxtype,specdata,outfile,auto=False):
     #
     flux_contsub = specdata_flux - contfit(specdata_velocity)
     line_free_flux_contsub = line_free_flux - contfit(line_free_velocity)
+    #
+    # Save to file
+    #
+    logfile = outfile.replace('.spec.pdf', '.contsub.specflux')
+    save_spec(range(len(specdata_velocity)), specdata_velocity, flux_contsub, logfile, fluxtype)
     #
     # Calculate average continuum
     #
@@ -1102,7 +1120,7 @@ def calc_te(line_brightness, e_line_brightness, line_fwhm, e_line_fwhm,
 def main(field,regions,spws,pdflabel,stokes='I',
          stackedspws=[],stackedlabels=[],
          smogrid_start=None, smogrid_res=None, smogrid_end=None,
-         fluxtype='peak',taper=False,imsmooth=False,
+         fluxtype='peak',taper=False,imsmooth=False, mosaic=False,
          weight=True,outfile='line_info.txt',
          config_file=None, auto=False, autostack=False):
     """
@@ -1151,6 +1169,8 @@ def main(field,regions,spws,pdflabel,stokes='I',
         if True, use uv-tapered images
       imsmooth :: boolean
         if True, use imsmooth images
+      mosaic :: boolean
+        if True, use mosaic images
       weight :: boolean
         if True, weight the stacked spectra by continuum/rms^2
       outfile :: string
@@ -1238,9 +1258,11 @@ def main(field,regions,spws,pdflabel,stokes='I',
             #
             imagename = '{0}.spw{1}.{2}.channel.clean'.format(field,spw,stokes)
             if taper: imagename += '.uvtaper'
-            imagename += '.pbcor'
+            if not mosaic: imagename += '.pbcor'
             if imsmooth: imagename += '.imsmooth'
-            imagename += '.image.fits'
+            imagename += '.image'
+            if mosaic: imagename += '.linmos'
+            imagename += '.fits'
             if not os.path.exists(imagename):
                 logger.info("{0} not found.".format(imagename))
                 continue
@@ -1263,6 +1285,11 @@ def main(field,regions,spws,pdflabel,stokes='I',
             #
             if smogrid_velocity is not None:
                 specdata = smooth_regrid(specdata, smogrid_velocity)
+            #
+            # Save data to file
+            #
+            logfile = '{0}.{1}.smooth_regrid.specflux'.format(imagename, region)
+            save_spec(range(len(specdata['velocity'])), specdata['velocity'], specdata['flux'], logfile, fluxtype)
             #
             # Save data for stacking
             #
@@ -1394,6 +1421,11 @@ def main(field,regions,spws,pdflabel,stokes='I',
             if weight: outfile += '.wt'
             outfile += '.spec.pdf'
             imagetitle = outfile.replace('.{0}'.format(region),'').replace('.spec.pdf','')
+            #
+            # Save data to file
+            #
+            logfile = outfile.replace('.spec.pdf', '.specflux')
+            save_spec(range(len(avgspecdata['velocity'])), avgspecdata['velocity'], avgspecdata['flux'], logfile, fluxtype)
             #
             # fit line
             #

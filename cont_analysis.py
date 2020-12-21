@@ -25,7 +25,7 @@ Changelog:
 Trey V. Wenger November 2018 - V1.0
 
 Trey V. Wenger September 2019 - V2.0
-    Update to WISP V2.0 to handle Stokes images
+    Update to WISP V2.0 to handle Stokes images and mosaics
 """
 
 import os
@@ -41,6 +41,7 @@ __version__ = "1.0"
 
 def main(field,regions,spws,label,
          stokes='I',fluxtype='peak',taper=False,imsmooth=False,
+         mosaic=False, skip_ps_check=False,
          skip_plot=False,outfile='cont_info.txt'):
     """
     Measure continuum flux density and rms for each source in the
@@ -67,6 +68,12 @@ def main(field,regions,spws,label,
         if True, use uv-tapered images
       imsmooth :: boolean
         if True, use imsmooth images
+      moisac :: boolean
+        if True, use mosaic images
+      skip_ps_check :: boolean
+        if True, skip the visibility analysis
+      skip_plot :: boolean
+        if True, skip uv-amplitude plots
       outfile :: string
         Filename where the output table is written.
 
@@ -107,9 +114,11 @@ def main(field,regions,spws,label,
             #
             image = '{0}.{1}.{2}.mfs.clean'.format(field, spw, stokes)
             if taper: image += '.uvtaper'
-            image += '.pbcor'
+            if not mosaic: image += '.pbcor'
             if imsmooth: image += '.imsmooth'
-            image += '.image.fits'
+            image += '.image'
+            if mosaic: image += '.linmos'
+            image += '.fits'
             if not os.path.exists(image):
                 print("{0} not found.".format(image))
                 continue
@@ -158,21 +167,34 @@ def main(field,regions,spws,label,
             C = np.sin(bpa)**2./(2.*bmaj**2.) + np.cos(bpa)**2./(2.*bmin**2.)
             beam_kernel = np.exp(-(A*lon_grid**2. + 2.*B*lon_grid*lat_grid + C*lat_grid**2.))
             #
-            # Read residual image
+            # Read residual image. For mosaics, this is primary beam corrected.
             #
             residualimage = '{0}.{1}.{2}.mfs.clean'.format(field, spw, stokes)
             if taper: residualimage += '.uvtaper'
             if imsmooth: residualimage += '.imsmooth'
-            residualimage += '.residual.fits'
+            residualimage += '.residual'
+            if mosaic: residualimage += '.linmos'
+            residualimage += '.fits'
             residual_hdu = fits.open(residualimage)[0]
-            image_rms = 1.4825*np.nanmedian(np.abs(residual_hdu.data[0,0]-np.nanmedian(residual_hdu.data[0,0])))
             #
-            # PB image, and PB-corrected rms
+            # PB image, and PB-correct or un-correct rms
             #
-            pbimage = '{0}.{1}.{2}.mfs.pb.fits'.format(field, spw, stokes)
+            pbimage = '{0}.{1}.{2}.mfs.pb'.format(field, spw, stokes)
+            if mosaic: pbimage += '.linmos'
+            pbimage += '.fits'
             pb_hdu = fits.open(pbimage)[0]
-            image_rms = image_rms/pb_hdu.data[0,0]
-            image_rms[np.isinf(image_rms)] = np.nan
+            #
+            # For mosaics: residual is pbcorrected
+            #
+            if mosaic:
+                image_rms = residual_hdu.data[0,0]*pb_hdu.data[0,0]
+                image_rms = 1.4825*np.nanmedian(np.abs(image_rms - np.nanmedian(image_rms)))
+                image_rms = image_rms/pb_hdu.data[0,0]
+                image_rms[np.isinf(image_rms)] = np.nan
+            else:
+                image_rms = 1.4825*np.nanmedian(np.abs(residual_hdu.data[0,0]-np.nanmedian(residual_hdu.data[0,0])))
+                image_rms = image_rms/pb_hdu.data[0,0]
+                image_rms[np.isinf(image_rms)] = np.nan
             #
             # Read region file, extract data from region center pixel
             #
@@ -241,66 +263,69 @@ def main(field,regions,spws,label,
                 #
                 e_cont_B = 1000.*np.mean(image_rms[region_mask]) * np.sqrt(area_pixel/beam_pixel) # mJy
                 #
-                # Extract sub image, FFT and divide by beam kernel
-                # to get de-convolved visibilities
-                #
-                sub_image = image_hdu.data[0,0] * region_mask
-                sub_image[np.isnan(sub_image)] = 0.
-                sub_vis = np.fft.fftshift(np.fft.fft2(sub_image))
-                beam_vis = np.fft.fftshift(np.fft.fft2(beam_kernel))
-                beam_vis[np.abs(beam_vis) < 1.e-3] = np.nan
-                deconvolve_vis = sub_vis/beam_vis
-                #
-                # FFT the grid to get uv distances
-                #
-                u_axis = np.fft.fftshift(np.fft.fftfreq(len(x_axis), d=-np.deg2rad(image_hdu.header['CDELT1'])))
-                v_axis = np.fft.fftshift(np.fft.fftfreq(len(y_axis), d=np.deg2rad(image_hdu.header['CDELT2'])))
-                v_grid, u_grid = np.meshgrid(v_axis, u_axis, indexing='ij')
-                uvwave = np.sqrt(u_grid**2. + v_grid**2.).flatten()
-                vis = 1000. * np.abs(deconvolve_vis.flatten()) # mJy
-                #
-                # Mask large uvwaves
-                #
-                uvwave_max = 4.*np.log(2.)/(np.pi*np.deg2rad(beam_maj))
-                vis[uvwave > uvwave_max] = np.nan
-                uvwave[uvwave > uvwave_max] = np.nan
-                #
-                # Check if this is a point source by computing the
-                # percent difference between first 1000 wavelengths
-                # and 1000 wavelengths before uvwave_max
-                #
-                is_zero = (uvwave < 1000)
-                vis_zero = np.nanmean(vis[is_zero])
-                is_max = (uvwave < uvwave_max)*(uvwave > uvwave_max-1000)
-                vis_max = np.nanmean(vis[is_max])
-                ps_check = 100.*(vis_max-vis_zero)/vis_zero
-                #
                 # Get average primary beam level over region
                 #
                 pb_level = 100.*np.nanmean(pb_hdu.data[0,0,region_mask])
-                #
-                # Plot visibilities
-                #
-                if not skip_plot:
-                    xmin = 0.
-                    xmax = uvwave_max
-                    ymin = -0.1*np.nanmax(vis)
-                    ymax = 1.1*np.nanmax(vis)
-                    plt.ioff()
-                    fig, ax = plt.subplots()
-                    h = ax.hist2d(uvwave, vis, # mJy
-                                  bins=20, norm=LogNorm(),
-                                  range=[[xmin,xmax],[ymin,ymax]])
-                    cb = fig.colorbar(h[3])
-                    cb.set_label("Number of Pixels")
-                    ax.set_xlabel(r"{\it uv} distance (wavelengths)")
-                    ax.set_ylabel(r"Amplitude (mJy)")
-                    title = '{0}.{1}'.format(label,spw)
-                    ax.set_title(title)
-                    fig.tight_layout()
-                    fig.savefig('{0}.{1}.vis.pdf'.format(label,spw))
-                    plt.close(fig)
-                    plt.ion()
+                if skip_ps_check:
+                    ps_check = np.nan
+                else:
+                    #
+                    # Extract sub image, FFT and divide by beam kernel
+                    # to get de-convolved visibilities
+                    #
+                    sub_image = image_hdu.data[0,0] * region_mask
+                    sub_image[np.isnan(sub_image)] = 0.
+                    sub_vis = np.fft.fftshift(np.fft.fft2(sub_image))
+                    beam_vis = np.fft.fftshift(np.fft.fft2(beam_kernel))
+                    beam_vis[np.abs(beam_vis) < 1.e-3] = np.nan
+                    deconvolve_vis = sub_vis/beam_vis
+                    #
+                    # FFT the grid to get uv distances
+                    #
+                    u_axis = np.fft.fftshift(np.fft.fftfreq(len(x_axis), d=-np.deg2rad(image_hdu.header['CDELT1'])))
+                    v_axis = np.fft.fftshift(np.fft.fftfreq(len(y_axis), d=np.deg2rad(image_hdu.header['CDELT2'])))
+                    v_grid, u_grid = np.meshgrid(v_axis, u_axis, indexing='ij')
+                    uvwave = np.sqrt(u_grid**2. + v_grid**2.).flatten()
+                    vis = 1000. * np.abs(deconvolve_vis.flatten()) # mJy
+                    #
+                    # Mask large uvwaves
+                    #
+                    uvwave_max = 4.*np.log(2.)/(np.pi*np.deg2rad(beam_maj))
+                    vis[uvwave > uvwave_max] = np.nan
+                    uvwave[uvwave > uvwave_max] = np.nan
+                    #
+                    # Check if this is a point source by computing the
+                    # percent difference between first 1000 wavelengths
+                    # and 1000 wavelengths before uvwave_max
+                    #
+                    is_zero = (uvwave < 1000)
+                    vis_zero = np.nanmean(vis[is_zero])
+                    is_max = (uvwave < uvwave_max)*(uvwave > uvwave_max-1000)
+                    vis_max = np.nanmean(vis[is_max])
+                    ps_check = 100.*(vis_max-vis_zero)/vis_zero
+                    #
+                    # Plot visibilities
+                    #
+                    if not skip_plot:
+                        xmin = 0.
+                        xmax = uvwave_max
+                        ymin = -0.1*np.nanmax(vis)
+                        ymax = 1.1*np.nanmax(vis)
+                        plt.ioff()
+                        fig, ax = plt.subplots()
+                        h = ax.hist2d(uvwave, vis, # mJy
+                                    bins=20, norm=LogNorm(),
+                                    range=[[xmin,xmax],[ymin,ymax]])
+                        cb = fig.colorbar(h[3])
+                        cb.set_label("Number of Pixels")
+                        ax.set_xlabel(r"{\it uv} distance (wavelengths)")
+                        ax.set_ylabel(r"Amplitude (mJy)")
+                        title = '{0}.{1}'.format(label,spw)
+                        ax.set_title(title)
+                        fig.tight_layout()
+                        fig.savefig('{0}.{1}.vis.pdf'.format(label,spw))
+                        plt.close(fig)
+                        plt.ion()
             #
             # Write row to file
             #

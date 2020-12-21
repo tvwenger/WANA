@@ -25,7 +25,7 @@ Changelog:
 Trey V. Wenger November 2018 - V1.0
 
 Trey V. Wenger September 2019 - V2.0
-    Update for WISP V2.0 support (stokes image names)
+    Update for WISP V2.0 support (stokes image names, mosaic)
 """
 
 import __main__ as casa
@@ -36,7 +36,7 @@ from astropy.io import fits
 __version__ = "2.0"
 
 def smooth_all(field, spws='', stokes='', imagetype='clean',
-               overwrite=False):
+               mosaic=False, overwrite=False):
     """
     Smooth all line and continuum images/cubes to largest 
     beam size of any individual image/cube.
@@ -51,6 +51,8 @@ def smooth_all(field, spws='', stokes='', imagetype='clean',
       imagetype :: string
         What images to process. For example,
         'dirty', 'clean', 'dirty.uvtaper', or 'clean.uvtaper'
+      mosaic :: boolean
+        if True, these are mosaic images (.linmos.fits)
       overwrite :: boolean
         if True, overwrite existing images
 
@@ -66,16 +68,23 @@ def smooth_all(field, spws='', stokes='', imagetype='clean',
     bmajs = []
     bmins = []
     # images
-    images = ['{0}.{1}.{2}.mfs.{3}.image.fits'.format(field, spw, stokes, imagetype)
+    imname = '{0}.{1}.{2}.mfs.{3}.image.fits'
+    if mosaic:
+        imname = '{0}.{1}.{2}.mfs.{3}.image.linmos.fits'
+    images = [imname.format(field, spw, stokes, imagetype)
               for spw in myspws
-              if os.path.exists('{0}.{1}.{2}.mfs.{3}.image.fits'.format(field,spw,stokes,imagetype))]
+              if os.path.exists(imname.format(field,spw,stokes,imagetype))]
     # residual images
-    resimages = [image.replace('.image.fits','.residual.fits') for image in images]
+    resimages = [image.replace('.image.', '.residual.') for image in images]
     # cubes
-    cubes = ['{0}.{1}.{2}.channel.{3}.image.fits'.format(field,spw,stokes,imagetype)
-             for spw in myspws if os.path.exists('{0}.{1}.{2}.channel.{3}.image.fits'.format(field,spw,stokes,imagetype))]
+    imname = '{0}.{1}.{2}.channel.{3}.image.fits'
+    if mosaic:
+        imname = '{0}.{1}.{2}.channel.{3}.image.linmos.fits'
+    cubes = [imname.format(field, spw, stokes, imagetype)
+             for spw in myspws
+             if os.path.exists(imname.format(field,spw,stokes,imagetype))]
     # residual cubes
-    rescubes = [cube.replace('.image.fits','.residual.fits') for cube in cubes]
+    rescubes = [image.replace('.image.', '.residual.') for image in cubes]
     for imagename, resimagename in zip(images+cubes, resimages+rescubes):
         with fits.open(imagename) as imhdulist:
             bunit = imhdulist[0].header['BUNIT']
@@ -119,19 +128,22 @@ def smooth_all(field, spws='', stokes='', imagetype='clean',
         velocity = 'channel' in imagename
         # smooth image
         outfile = imagename.replace('.image.fits','.imsmooth.image')
+        if mosaic:
+            outfile = imagename.replace('.image.linmos.fits', '.imsmooth.image.linmos')
         casa.imsmooth(imagename=imagename,kernel='gauss',
                       targetres=True,major=bmaj_target,minor=bmin_target,
                       pa=bpa_target,outfile=outfile,overwrite=overwrite)
         casa.exportfits(imagename=outfile,fitsimage='{0}.fits'.format(outfile),
                         velocity=velocity,overwrite=True,history=False)
         # primary beam correct
-        smoimagename = outfile
-        pbimage = imagename.replace('.{0}.image.fits'.format(imagetype), '.pb.fits')
-        outfile = imagename.replace('.image.fits', '.pbcor.imsmooth.image')
-        casa.impbcor(imagename=smoimagename, pbimage=pbimage,
-                     outfile=outfile, overwrite=True)
-        casa.exportfits(imagename=outfile,fitsimage='{0}.fits'.format(outfile),
-                        velocity=velocity,overwrite=True,history=False)
+        if not mosaic:
+            smoimagename = outfile
+            pbimage = imagename.replace('.{0}.image.fits'.format(imagetype), '.pb.fits')
+            outfile = imagename.replace('.image.fits', '.pbcor.imsmooth.image')
+            casa.impbcor(imagename=smoimagename, pbimage=pbimage,
+                        outfile=outfile, overwrite=True)
+            casa.exportfits(imagename=outfile,fitsimage='{0}.fits'.format(outfile),
+                            velocity=velocity,overwrite=True,history=False)
         # check that residual image has beam size, if not add it
         with fits.open(resimagename, 'update') as hdulist:
             hdu = hdulist[0]
@@ -141,6 +153,8 @@ def smooth_all(field, spws='', stokes='', imagetype='clean',
                 hdu.header['BPA'] = bpa_target['value']
         # smooth residual image
         outfile = resimagename.replace('.residual.fits','.imsmooth.residual')
+        if mosaic:
+            outfile = resimagename.replace('.residual.linmos.fits', '.imsmooth.residual.linmos')
         casa.imsmooth(imagename=resimagename,kernel='gauss',
                       targetres=True,major=bmaj_target,minor=bmin_target,
                       pa=bpa_target,outfile=outfile,overwrite=overwrite)
@@ -148,7 +162,8 @@ def smooth_all(field, spws='', stokes='', imagetype='clean',
                         velocity=velocity,overwrite=True,history=False)
     print("Done!")
 
-def main(field, spws, stokes='I', imagetype='clean', overwrite=False,):
+def main(field, spws, stokes='I', imagetype='clean', mosaic=False,
+         overwrite=False,):
     """
     Smooth all MFS and cube spws to a common beam size.
 
@@ -162,6 +177,8 @@ def main(field, spws, stokes='I', imagetype='clean', overwrite=False,):
       imagetype :: string
         What images to process. For example,
         'dirty', 'clean', 'dirty.uvtaper', or 'clean.uvtaper'
+      mosaic :: boolean
+        if True, these are mosaic images (.linmos.fits)
       overwrite :: boolean
         if True, overwrite existing images
 
@@ -171,4 +188,4 @@ def main(field, spws, stokes='I', imagetype='clean', overwrite=False,):
     # Smooth all MFS and channel images to common beam
     #
     smooth_all(field, spws=spws, stokes=stokes, imagetype=imagetype,
-               overwrite=overwrite)
+               mosaic=mosaic, overwrite=overwrite)
